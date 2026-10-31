@@ -1,0 +1,19 @@
+services:
+  tubetv:
+    build:
+      context: .
+      args:
+        YTDLP_VERSION: "2026.10.26"
+    image: tubetv:latest
+    container_name: tubetv
+    restart: unless-stopped
+    # 8099 is already taken on this Pi by another container, so publish 8484.
+    ports:
+      - "${TUBETV_PORT:-8484}:8484"
+    environment:
+      # Recommendations region / UI language.
+      YT_GL: "PT"
+      YT_HL: "en"
+    volumes:
+      # Holds auth.json + pending.json, so sign-in survives rebuilds/restarts.
+      - ./data:/app/data

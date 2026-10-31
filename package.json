@@ -1,0 +1,10 @@
+{
+  "name": "smarttube-lite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted, ad-free YouTube TV feed for browsers that can't run SmartTube",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
