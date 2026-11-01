@@ -14,6 +14,21 @@ function bin() {
   return 'yt-dlp';
 }
 
+// Which yt-dlp would actually run, and whether it's usable. Logged at startup
+// so a wrong-architecture binary is obvious in /logs.
+export function binary() {
+  return bin();
+}
+
+export async function version() {
+  try {
+    const { stdout } = await execFileAsync(bin(), ['--version'], { timeout: 20000 });
+    return stdout.trim();
+  } catch (e) {
+    return 'NOT RUNNABLE: ' + friendly(e).slice(0, 160);
+  }
+}
+
 // Prefer H.264 + AAC-LC because TV browsers (and VIDAA's old Chromium) often
 // cannot decode VP9/AV1, HE-AAC, or mux separate DASH tracks reliably.
 function splitFormat(maxHeight) {
@@ -84,6 +99,38 @@ function pick(ret) {
     };
   }
   return null;
+}
+
+// Which resolutions this video actually offers in H.264, for the quality menu.
+export async function qualities(id) {
+  const key = `q:${id}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < TTL) return hit.data;
+
+  let ret = null;
+  for (const f of [splitFormat(1080), MUXED_FORMAT, 'b']) {
+    try {
+      ret = await info(id, f);
+      break;
+    } catch {}
+  }
+  if (!ret) throw new Error('Could not list formats for this video.');
+
+  if (ret.is_live || ret.live_status === 'is_live') {
+    const data = { live: true, heights: [] };
+    cache.set(key, { at: Date.now(), data, ttl: 60_000 });
+    return data;
+  }
+
+  const heights = new Set();
+  for (const f of ret.formats || []) {
+    if (!f.height || !f.vcodec || !String(f.vcodec).startsWith('avc1')) continue;
+    if (String(f.protocol || '').startsWith('m3u8')) continue;
+    if (f.height <= 1080) heights.add(f.height);
+  }
+  const data = { live: false, heights: [...heights].sort((a, b) => b - a) };
+  cache.set(key, { at: Date.now(), data });
+  return data;
 }
 
 export async function resolve(id, { muxed = false, height = 1080 } = {}) {

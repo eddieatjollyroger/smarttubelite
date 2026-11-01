@@ -6,13 +6,18 @@ import { Readable } from 'node:stream';
 
 import * as auth from './lib/auth.js';
 import * as yt from './lib/innertube.js';
-import { resolve as resolveStream } from './lib/ytdlp.js';
-import { page, grid, card, esc } from './lib/ui.js';
+import {
+  resolve as resolveStream,
+  qualities as resolveQualities,
+  binary as ytdlpBinary,
+  version as ytdlpVersion,
+} from './lib/ytdlp.js';
+import { page, grid, card, comment, esc } from './lib/ui.js';
 
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-01.1';
+const BUILD = '2026-11-01.3';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -288,6 +293,12 @@ const DIAG_JS = `
   say('');
 
   function test(label, url, done) {
+    if (!url) {
+      say(label + ': skipped (no stream)');
+      report();
+      if (done) done();
+      return;
+    }
     var t = document.createElement('video');
     var finished = false;
     var extra = '';
@@ -306,6 +317,13 @@ const DIAG_JS = `
       finished = true;
       say(label + ': ' + msg);
       report();
+      // Release the decoder before the next test: TV chips often have only one.
+      try {
+        t.pause();
+        t.removeAttribute('src');
+        t.load();
+        if (t.parentNode) t.parentNode.removeChild(t);
+      } catch (e) {}
       if (done) done();
     }
     t.addEventListener('error', function () {
@@ -320,19 +338,39 @@ const DIAG_JS = `
     });
 
     t.src = url;
-    try {
-      var p = t.play();
-      if (p && p.catch) p.catch(function () { extra += ' autoplay-blocked'; });
-    } catch (e) { extra += ' play-threw'; }
+    function kick() {
+      try {
+        var p = t.play();
+        if (!p || !p.then) { extra += ' play=undefined'; return; }
+        p.then(function () { extra += ' play=ok'; }, function (err) {
+          var name = (err && err.name) || '?';
+          // AbortError = the attempt was cancelled, usually by the browser
+          // still setting up the element. One retry is enough.
+          if (name === 'AbortError' && !t.dataset.retried) {
+            t.dataset.retried = '1';
+            setTimeout(kick, 400);
+            return;
+          }
+          extra += ' play=' + name;
+        });
+      } catch (e) { extra += ' play-threw'; }
+    }
+    kick();
 
     setTimeout(function () {
-      finish('TIMEOUT t=' + t.currentTime.toFixed(1) + ' rs=' + t.readyState + ' ns=' + t.networkState + extra);
-    }, 15000);
+      finish('TIMEOUT t=' + t.currentTime.toFixed(1) + ' rs=' + t.readyState +
+        ' ns=' + t.networkState + ' paused=' + t.paused + extra);
+    }, 10000);
   }
 
   // The real player uses a video-only element plus a separate audio element.
   // Test that exact combination: both must decode and advance together.
-  function pair(j) {
+  function pair(j, done) {
+    if (!j || !j.video) {
+      say('8. video+audio pair: skipped');
+      if (done) done();
+      return;
+    }
     var vv = document.createElement('video');
     var aa = document.createElement('audio');
     vv.muted = true;
@@ -344,39 +382,60 @@ const DIAG_JS = `
     vv.style.margin = '6px';
     box.appendChild(vv);
     aa.preload = 'auto';
+    aa.muted = true; // autoplay policy, not a playback test
     vv.src = j.video;
     if (j.audio) aa.src = j.audio;
     try { vv.play(); } catch (e) {}
     if (j.audio) { try { aa.play(); } catch (e) {} }
     setTimeout(function () {
-      say('6. video+audio pair: v=' + vv.currentTime.toFixed(1) + 's rs=' + vv.readyState +
+      say('8. video+audio pair: v=' + vv.currentTime.toFixed(1) + 's rs=' + vv.readyState +
+          ' vpaused=' + vv.paused +
           ' verr=' + (vv.error ? vv.error.code : 0) +
           ' a=' + aa.currentTime.toFixed(1) + 's ars=' + aa.readyState +
+          ' apaused=' + aa.paused +
           ' aerr=' + (aa.error ? aa.error.code : 0));
+      try {
+        vv.pause(); vv.removeAttribute('src'); vv.load();
+        aa.pause(); aa.removeAttribute('src'); aa.load();
+      } catch (e) {}
       report();
-    }, 12000);
+      if (done) done();
+    }, 10000);
   }
 
   var DIRECT = 'https://download.samplelib.com/mp4/sample-5s.mp4';
   var PROXIED = '/api/probe?u=' + encodeURIComponent(DIRECT);
   var id = new URLSearchParams(location.search).get('id') || 'aqz-KE-bpKQ';
 
-  test('1. direct mp4', DIRECT, function () {
+  // Tests run strictly one after another: TV chips usually have a single video
+  // decoder, and playing several elements at once makes the results lie.
+  function playInfo(q, label, next) {
+    fetch('/api/play?id=' + id + q, { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        say(label + ': ' + JSON.stringify(j).slice(0, 260));
+        next(j);
+      })
+      .catch(function (e) { say(label + ' FAILED: ' + e); next(null); });
+  }
+
+  test('1. direct mp4 (video+audio)', DIRECT, function () {
     test('2. proxied mp4', PROXIED, function () {
-      fetch('/api/play?id=' + id)
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          say('3. /api/play: ' + JSON.stringify(j).slice(0, 300));
-          if (j.video) {
-            test('4. youtube video', j.video, function () { say('done'); });
-            if (j.audio) test('5. youtube audio', j.audio, function () { say('done'); });
-            pair(j);
-          } else {
-            say('done (no stream resolved)');
-            report();
-          }
-        })
-        .catch(function (e) { say('3. /api/play FAILED: ' + e); report(); });
+      playInfo('', '3. /api/play 1080p', function (a) {
+        test('4. youtube video-only 1080p', a && a.video, function () {
+          playInfo('&h=720', '4b. /api/play 720p', function (b) {
+            test('5. youtube video-only 720p', b && b.video, function () {
+              playInfo('&muxed=1', '5b. /api/play muxed', function (c) {
+                test('6. youtube muxed (video+audio in one file)', c && c.video, function () {
+                  test('7. youtube audio-only', a && a.audio, function () {
+                    pair(a, function () { say('done'); report(); });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
     });
   });
 })();
@@ -393,25 +452,46 @@ const PLAYER_JS = `
   var startBtn = document.getElementById('start');
   var hud = document.getElementById('hud');
   var ov = document.getElementById('ov');
+  var bar = document.getElementById('ovb');
   var clock = document.getElementById('clock');
+  var prog = document.getElementById('prog');
+  var progfill = document.getElementById('progfill');
+  var playBtn = document.getElementById('ctlplay');
+  var gearBtn = document.getElementById('ctlgear');
+  var cmtBtn = document.getElementById('ctlcmt');
+  var ctlBtns = [playBtn, gearBtn, cmtBtn];
+  var panel = document.getElementById('panel');
+  var panelTitle = document.getElementById('paneltitle');
+  var panelBody = document.getElementById('panelbody');
 
-  var tiers = [{ h: 1080 }, { h: 720 }, { h: 480 }, { muxed: 1 }];
+  var tiers = [{ h: 1080 }, { h: 720 }, { h: 480 }, { h: 360 }, { muxed: 1 }];
   var tier = 0;
-  var mutedFallback = false;
+  var resumeAt = 0;
+  var userPaused = false;
+  var soundBlocked = false;
   var hideTimer = null;
+  var barOn = false;
+  var panelKind = null;
+  var cmtToken = null;
+  var cmtLoading = false;
+  var lastClock = '';
   var started = false;
   var isLive = false;
   var hls = null;
+  var watchdog = null;
 
-  // Remember the highest tier this TV could actually decode, so it doesn't
-  // re-discover the limit on every video. Opening /watch?id=...&h=1080 resets it.
-  var forced = parseInt(params.get('h') || '', 10);
+  // Highest quality that worked last time (cascade), or an explicit pick from
+  // the quality menu (tubetv.h), or a one-off override in the URL (?h=720).
   try {
-    if (forced) {
+    var qh = parseInt(params.get('h') || '', 10);
+    var savedH = parseInt(localStorage.getItem('tubetv.h') || '', 10);
+    if (qh) {
       localStorage.removeItem('tubetv.tier');
-      for (var i = 0; i < tiers.length; i++) {
-        if (tiers[i].h === forced) { tier = i; break; }
-      }
+      tiers[0] = { h: qh };
+      tier = 0;
+    } else if (savedH) {
+      tiers[0] = { h: savedH };
+      tier = 0;
     } else {
       var saved = parseInt(localStorage.getItem('tubetv.tier') || '', 10);
       if (saved > 0 && saved < tiers.length) tier = saved;
@@ -446,16 +526,39 @@ const PLAYER_JS = `
     if (!sticky) hideTimer = setTimeout(function () { hud.className = 'hud hide'; }, 5000);
   }
 
-  function showChrome() {
-    if (ov) ov.className = 'ov';
-    hud.className = 'hud';
+  function fmt(s) {
+    s = Math.floor(s || 0);
+    var m = Math.floor(s / 60), r = s % 60;
+    return m + ':' + (r < 10 ? '0' : '') + r;
+  }
+
+  // --- chrome (title bar + control bar) ---------------------------------
+  function setBar(on) {
+    barOn = on;
+    ov.className = on ? 'ov' : 'ov hide';
+    bar.className = on ? 'ovb' : 'ovb hide';
+    if (!on) {
+      try { document.activeElement.blur(); } catch (e) {}
+    }
+  }
+
+  function chrome() {
+    setBar(true);
     if (hideTimer) clearTimeout(hideTimer);
     hideTimer = setTimeout(function () {
-      if (!v.paused) {
-        if (ov) ov.className = 'ov hide';
-        hud.className = 'hud hide';
-      }
-    }, 4000);
+      if (!v.paused && !panelKind) setBar(false);
+    }, 5000);
+  }
+
+  function focusBtn(i) {
+    if (i < 0) i = 0;
+    if (i > ctlBtns.length - 1) i = ctlBtns.length - 1;
+    var b = ctlBtns[i];
+    if (b) b.focus();
+  }
+
+  function syncPlayLabel() {
+    playBtn.textContent = v.paused ? 'Play' : 'Pause';
   }
 
   function fullscreen() {
@@ -479,55 +582,63 @@ const PLAYER_JS = `
     fullscreen();
   }
 
+  // --- playback ---------------------------------------------------------
+  // Always start muted: browsers allow that without a gesture, so playback
+  // begins on its own like a real player app. Then try to switch sound on.
   function tryPlay() {
     var p;
     try { p = v.play(); } catch (e) { p = null; }
-    if (!p || !p.then) { startBtn.style.display = 'none'; return; }
+    if (!p || !p.then) {
+      startBtn.style.display = 'none';
+      maybeUnmute();
+      return;
+    }
     p.then(function () {
       startBtn.style.display = 'none';
-    }).catch(function () {
-      if (mutedFallback) { startBtn.style.display = 'inline-block'; return; }
-      // Sound autoplay blocked. Prove playback muted, then let one OK unmute.
-      mutedFallback = true;
-      v.muted = true;
-      if (a.src) a.muted = true;
-      var q;
-      try { q = v.play(); } catch (e) { q = null; }
-      if (q && q.then) {
-        q.then(function () {
-          startBtn.style.display = 'none';
-          hint('Muted autoplay. Press OK / Play for sound.', true);
-          report('muted-autoplay', {});
-        }).catch(function () {
-          startBtn.style.display = 'inline-block';
-          report('autoplay-blocked', {});
-        });
-      } else {
-        startBtn.style.display = 'inline-block';
-      }
+      report('playing', { tier: tier, muted: v.muted });
+      maybeUnmute();
+    }).catch(function (e) {
+      startBtn.style.display = 'inline-block';
+      report('autoplay-blocked', { name: (e && e.name) || '?' });
     });
   }
 
-  function unmute() {
+  function maybeUnmute() {
+    if (!v.muted || soundBlocked) return;
     v.muted = false;
-    a.muted = false;
-    a.volume = v.volume;
+    if (a.src) { a.muted = false; a.volume = v.volume; }
+    setTimeout(function () {
+      if (v.paused) {
+        soundBlocked = true;
+        v.muted = true;
+        if (a.src) a.muted = true;
+        try { v.play(); } catch (e) {}
+        hint('Sound needs one press — OK to unmute', true);
+      }
+    }, 600);
+  }
+
+  function unmute() {
+    soundBlocked = false;
+    v.muted = false;
+    if (a.src) { a.muted = false; a.volume = v.volume; }
   }
 
   function attach(info) {
     started = true;
     ttl.textContent = info.title || id;
     document.title = (info.title || 'TubeTV') + ' · TubeTV';
+    v.muted = true;
     v.src = info.video;
     if (info.audio) {
       a.src = info.audio;
+      a.muted = true;
       a.volume = v.volume;
-      a.muted = v.muted;
     }
-    report('attached', { tier: tier, h: info.height, audio: !!info.audio });
+    report('attached', { tier: tier, h: info.height, codec: info.vcodec, audio: !!info.audio });
     startWatchdog();
     tryPlay();
-    showChrome();
+    chrome();
     // Fullscreen usually needs a gesture; this is a free attempt on TV browsers
     // that allow it, and a CSS full-bleed layout covers the ones that don't.
     setTimeout(fullscreen, 400);
@@ -547,6 +658,7 @@ const PLAYER_JS = `
     isLive = true;
     ttl.textContent = info.title || 'Live';
     document.title = (info.title || 'Live') + ' · TubeTV';
+    prog.style.display = 'none';
     hint('LIVE', true);
     report('live-attach', { hasMSE: typeof window.MediaSource !== 'undefined' });
 
@@ -561,7 +673,7 @@ const PLAYER_JS = `
           enableWorker: false,
           lowLatencyMode: false,
           capLevelToPlayerSize: true,
-          abrEwmaDefaultEstimate: 2000000,
+          abrEwmaDefaultEstimate: 2000000
         });
         hls.on(window.Hls.Events.ERROR, function (ev, data) {
           report('hls-error', { type: data.type, details: data.details, fatal: !!data.fatal });
@@ -586,7 +698,7 @@ const PLAYER_JS = `
             }, 10000);
           }
           tryPlay();
-          showChrome();
+          chrome();
         });
         hls.attachMedia(v);
         hls.loadSource(info.hls);
@@ -595,7 +707,7 @@ const PLAYER_JS = `
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
       v.src = info.hls;
       tryPlay();
-      showChrome();
+      chrome();
     } else {
       showErr('This TV browser cannot play livestreams (no MediaSource / HLS support).');
     }
@@ -619,6 +731,25 @@ const PLAYER_JS = `
       .catch(function (e) { showErr('Request failed: ' + e); });
   }
 
+  function restart() {
+    stopWatchdog();
+    userPaused = false;
+    err.style.display = 'none';
+    startBtn.style.display = 'none';
+    try { a.pause(); a.removeAttribute('src'); a.load(); } catch (e) {}
+    try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+    load();
+  }
+
+  function setQuality(h) {
+    try { localStorage.setItem('tubetv.h', String(h)); } catch (e) {}
+    resumeAt = v.currentTime || 0;
+    tiers[tier] = { h: h };
+    closePanel();
+    restart();
+    hint('Quality: ' + h + 'p', true);
+  }
+
   function seek(delta) {
     if (isLive) { hint('Live stream — no seeking', true); return; }
     try {
@@ -626,44 +757,143 @@ const PLAYER_JS = `
       if (a.src) a.currentTime = v.currentTime;
     } catch (e) {}
     hint((delta > 0 ? '+' : '') + delta + 's · ' + fmt(v.currentTime), true);
-    showChrome();
-  }
-
-  function fmt(s) {
-    s = Math.floor(s || 0);
-    var m = Math.floor(s / 60), r = s % 60;
-    return m + ':' + (r < 10 ? '0' : '') + r;
+    chrome();
   }
 
   function toggle() {
     if (startBtn.style.display !== 'none') { startBtn.click(); return; }
-    if (v.muted && !v.paused) { unmute(); hint('Sound on'); showChrome(); return; }
+    if (v.muted && !v.paused) { unmute(); hint('Sound on'); chrome(); return; }
     if (v.paused) {
+      userPaused = false;
       unmute();
       var p = v.play();
       if (p && p.catch) p.catch(function () { startBtn.style.display = 'inline-block'; });
       if (a.src) a.play().catch(function () {});
       hint('Playing');
     } else {
+      userPaused = true;
       v.pause();
       hint('Paused');
     }
-    showChrome();
+    syncPlayLabel();
+    chrome();
   }
 
-  startBtn.addEventListener('click', function () {
-    startBtn.style.display = 'none';
-    mutedFallback = false;
-    unmute();
-    var p = v.play();
-    if (p && p.catch) p.catch(function () {});
-    if (a.src) a.play().catch(function () {});
-    fullscreen();
-    showChrome();
+  // --- panels (quality / comments) --------------------------------------
+  function openPanel(kind) {
+    panelKind = kind;
+    panel.className = 'panel ' + (kind === 'comments' ? 'cmt' : 'qual');
+    panelBody.scrollTop = 0;
+    if (hideTimer) clearTimeout(hideTimer);
+    setBar(false);
+    if (kind === 'quality') renderQuality();
+    else renderComments(true);
+    try { panel.focus(); } catch (e) {}
+    report('panel', { kind: kind });
+  }
+
+  function closePanel() {
+    panelKind = null;
+    panel.className = 'panel hide';
+    panelBody.innerHTML = '';
+    try { document.activeElement.blur(); } catch (e) {}
+    chrome();
+  }
+
+  function renderQuality() {
+    panelTitle.textContent = 'Quality';
+    panelBody.innerHTML = '<div class="pnote">Checking available formats…</div>';
+    fetch('/api/qualities?id=' + encodeURIComponent(id), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (panelKind !== 'quality') return;
+        if (j && j.live) {
+          panelBody.innerHTML = '<div class="pnote">Livestream: quality follows the network automatically.</div>';
+          return;
+        }
+        var hs = (j && j.heights) || [];
+        var html = '';
+        for (var i = 0; i < hs.length; i++) {
+          html += '<button class="row" data-h="' + hs[i] + '"><span>' + hs[i] + 'p</span>' +
+            (hs[i] === tiers[tier].h ? '<span class="chk">current</span>' : '') + '</button>';
+        }
+        if (!html) html = '<div class="pnote">No selectable formats for this video.</div>';
+        html += '<button class="row" id="qauto"><span>Automatic</span><span class="chk">start high, step down</span></button>';
+        panelBody.innerHTML = html;
+
+        var rows = panelBody.querySelectorAll('button[data-h]');
+        for (var k = 0; k < rows.length; k++) {
+          rows[k].addEventListener('click', function () {
+            setQuality(parseInt(this.getAttribute('data-h'), 10));
+          });
+        }
+        var auto = document.getElementById('qauto');
+        if (auto) {
+          auto.addEventListener('click', function () {
+            try { localStorage.removeItem('tubetv.h'); } catch (e) {}
+            tiers[tier] = { h: 1080 };
+            closePanel();
+            restart();
+            hint('Quality: automatic', true);
+          });
+        }
+        var first = panelBody.querySelector('button.row');
+        if (first) first.focus();
+      })
+      .catch(function () {
+        if (panelKind === 'quality') panelBody.innerHTML = '<div class="pnote">Could not list formats.</div>';
+      });
+  }
+
+  function renderComments(reset) {
+    if (cmtLoading) return;
+    if (reset) {
+      panelTitle.textContent = 'Comments';
+      cmtToken = null;
+      panelBody.innerHTML = '<div class="pnote">Loading comments…</div>';
+    }
+    cmtLoading = true;
+    var u = '/api/comments?id=' + encodeURIComponent(id) +
+      (cmtToken ? '&token=' + encodeURIComponent(cmtToken) : '');
+    fetch(u, { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        cmtLoading = false;
+        if (panelKind !== 'comments') return;
+        if (reset) panelBody.innerHTML = '';
+        if (j && j.error) {
+          panelBody.innerHTML = '<div class="pnote">' +
+            (j.error === 'comments off' ? 'Comments are turned off for this video.' : 'Could not load comments.') +
+            '</div>';
+          return;
+        }
+        if (!j || !j.html) {
+          panelBody.innerHTML = '<div class="pnote">No comments yet.</div>';
+          return;
+        }
+        var box = document.createElement('div');
+        box.innerHTML = j.html;
+        while (box.firstChild) panelBody.appendChild(box.firstChild);
+        cmtToken = j.token || null;
+      })
+      .catch(function () {
+        cmtLoading = false;
+        if (panelKind === 'comments' && reset) {
+          panelBody.innerHTML = '<div class="pnote">Could not load comments.</div>';
+        }
+      });
+  }
+
+  panelBody.addEventListener('scroll', function () {
+    if (panelKind !== 'comments' || !cmtToken || cmtLoading) return;
+    if (panelBody.scrollTop + panelBody.clientHeight > panelBody.scrollHeight - 500) renderComments(false);
   });
 
-  // --- audio/video sync ------------------------------------------------
-  v.addEventListener('play', function () { if (a.src) a.play().catch(function () {}); });
+  // --- audio/video sync -------------------------------------------------
+  v.addEventListener('play', function () {
+    if (a.src) a.play().catch(function () {});
+    syncPlayLabel();
+  });
   v.addEventListener('playing', function () {
     startBtn.style.display = 'none';
     if (isLive) { lastClock = ''; updateClock(); hint('LIVE', true); }
@@ -673,7 +903,7 @@ const PLAYER_JS = `
     }
     a.play().catch(function () {});
   });
-  v.addEventListener('pause', function () { a.pause(); showChrome(); });
+  v.addEventListener('pause', function () { a.pause(); syncPlayLabel(); chrome(); });
   v.addEventListener('seeking', function () {
     if (a.src) { try { a.currentTime = v.currentTime; } catch (e) {} }
   });
@@ -686,8 +916,7 @@ const PLAYER_JS = `
   v.addEventListener('ratechange', function () { a.playbackRate = v.playbackRate; });
   v.addEventListener('ended', function () { a.pause(); });
 
-  // --- clock ------------------------------------------------------------
-  var lastClock = '';
+  // --- clock + progress -------------------------------------------------
   function updateClock() {
     var s;
     if (isLive) {
@@ -695,25 +924,34 @@ const PLAYER_JS = `
     } else if (!isFinite(v.duration) || v.duration <= 0) {
       s = fmt(v.currentTime);
     } else {
-      var left = Math.max(0, v.duration - v.currentTime);
-      s = fmt(v.currentTime) + ' / ' + fmt(v.duration) + '   −' + fmt(left);
+      s = fmt(v.currentTime) + ' / ' + fmt(v.duration) + '   −' + fmt(Math.max(0, v.duration - v.currentTime));
     }
     if (s !== lastClock) {
       lastClock = s;
       clock.textContent = s;
     }
+    if (!isLive && isFinite(v.duration) && v.duration > 0 && progfill) {
+      progfill.style.width = Math.min(100, (v.currentTime / v.duration) * 100).toFixed(2) + '%';
+    }
   }
   v.addEventListener('timeupdate', updateClock);
-  v.addEventListener('loadedmetadata', updateClock);
   v.addEventListener('durationchange', updateClock);
+  v.addEventListener('loadedmetadata', function () {
+    if (resumeAt > 1 && isFinite(v.duration) && resumeAt < v.duration - 5) {
+      try { v.currentTime = resumeAt; } catch (e) {}
+      if (a.src) { try { a.currentTime = resumeAt; } catch (e) {} }
+    }
+    resumeAt = 0;
+    updateClock();
+    // Some TV browsers only honour play() once metadata exists.
+    if (v.paused && !userPaused && startBtn.style.display === 'none') tryPlay();
+  });
 
   // No native controls (they steal arrow keys on TV browsers) — tap/click the
   // picture to play or pause.
   v.addEventListener('click', function () { fullscreenOnce(); toggle(); });
 
   // --- failure handling: step down quality, then give up with detail ----
-  var watchdog = null;
-
   function stopWatchdog() {
     if (watchdog) {
       clearInterval(watchdog);
@@ -725,36 +963,68 @@ const PLAYER_JS = `
     if (isLive) return false;
     if (tier >= tiers.length - 1) return false;
     tier++;
-    // Only a codec/decode failure (or a stall) says anything about this TV's
-    // decoder; a network error should not permanently lower the quality.
-    if (why === 'stalled' || /^(video|audio)-[34]$/.test(why)) {
+    // A frozen stream is the strongest signal that this TV's decoder (or its
+    // video-only pipeline) cannot handle the format, so remember the tier.
+    if (why === 'frozen' || why === 'stalled' || /^(video|audio)-[34]$/.test(why)) {
       try { localStorage.setItem('tubetv.tier', String(tier)); } catch (e) {}
     }
     var t = tiers[tier];
     hint('Trying ' + (t.muxed ? 'the compatible stream' : t.h + 'p') + '…', true);
     report('step-down', { why: why, tier: tier });
     stopWatchdog();
-    a.removeAttribute('src');
-    v.removeAttribute('src');
+    try { a.pause(); a.removeAttribute('src'); a.load(); } catch (e) {}
+    try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+    tiers[tier] = tiers[tier] || { h: 480 };
     load();
     return true;
   }
 
+  // Some TV browsers (including VIDAA) fetch a stream, report readyState 4 and
+  // then never advance the clock — no error, no frames, just a frozen picture.
+  // So the watchdog watches *progress*, not readiness.
   function startWatchdog() {
     stopWatchdog();
+    var lastT = -1;
+    var lastMove = Date.now();
+    var warned = false;
+
     watchdog = setInterval(function () {
-      if (!started || isLive || v.paused) return;
-      if (v.currentTime > 0 || v.readyState >= 2) {
-        stopWatchdog();
+      if (!started || isLive) return;
+      if (panelKind) { lastMove = Date.now(); return; }
+      // Waiting for the viewer to press OK is legitimate — not a stall.
+      if (startBtn && startBtn.style.display !== 'none') { lastMove = Date.now(); return; }
+      if (v.paused) { lastMove = Date.now(); return; }
+
+      var now = Date.now();
+      var t = v.currentTime || 0;
+      if (t > lastT + 0.05) {
+        lastT = t;
+        lastMove = now;
+        warned = false;
         return;
       }
-      // Waiting for the viewer to press OK is legitimate — not a stall.
-      if (startBtn.style.display !== 'none') return;
-      if (stepDown('stalled')) return;
+
+      var idle = now - lastMove;
+      // Not enough data yet is a network problem: give it longer.
+      var limit = v.readyState >= 3 ? 8000 : 20000;
+
+      if (!warned && idle > 4000) {
+        warned = true;
+        hint('Loaded, but playback is not starting — trying a compatible format…', true);
+        report('frozen', { rs: v.readyState, ns: v.networkState, tier: tier, t: t });
+      }
+
+      if (idle < limit) return;
+      if (stepDown(v.readyState >= 3 ? 'frozen' : 'stalled')) {
+        lastT = -1;
+        lastMove = Date.now();
+        warned = false;
+        return;
+      }
       stopWatchdog();
-      showErr('Stalled: no data after 20s (readyState ' + v.readyState +
-        ', networkState ' + v.networkState + '). Open /diag on this TV.');
-    }, 20000);
+      showErr('This TV could not play any of the available formats (readyState ' +
+        v.readyState + ', networkState ' + v.networkState + '). Open /diag on this TV.');
+    }, 2000);
   }
 
   v.addEventListener('error', function () {
@@ -772,54 +1042,138 @@ const PLAYER_JS = `
     showErr('Audio failed (' + errName(code) + '). Video may still play.');
   });
 
+  // --- buttons ----------------------------------------------------------
+  document.getElementById('back').addEventListener('click', function () {
+    if (window.history.length > 1) window.history.back();
+    else window.location.href = '/';
+  });
+  playBtn.addEventListener('click', toggle);
+  gearBtn.addEventListener('click', function () { openPanel('quality'); });
+  cmtBtn.addEventListener('click', function () { openPanel('comments'); });
+  startBtn.addEventListener('click', function () {
+    startBtn.style.display = 'none';
+    unmute();
+    var p = v.play();
+    if (p && p.catch) p.catch(function () {});
+    if (a.src) a.play().catch(function () {});
+    fullscreen();
+    chrome();
+    syncPlayLabel();
+  });
+
   // --- remote keys ------------------------------------------------------
+  function isBack(c, k) {
+    return c === 8 || c === 27 || c === 4 || c === 461 || c === 10009 ||
+      k === 'Escape' || k === 'Back' || k === 'Backspace' || k === 'GoBack';
+  }
+  function isUp(c, k) { return c === 38 || k === 'ArrowUp' || k === 'Up'; }
+  function isDown(c, k) { return c === 40 || k === 'ArrowDown' || k === 'Down'; }
+  function isLeft(c, k) { return c === 37 || k === 'ArrowLeft' || k === 'Left'; }
+  function isRight(c, k) { return c === 39 || k === 'ArrowRight' || k === 'Right'; }
+  function isOk(c, k) {
+    return c === 13 || c === 23 || k === 'Enter' || k === 'OK' || k === 'Select' || k === 'Accept';
+  }
+
   document.addEventListener('keydown', function (e) {
     var k = e.key || '';
     var c = e.keyCode || e.which || 0;
 
-    if (c === 8 || c === 27 || c === 4 || c === 461 || c === 10009 ||
-        k === 'Escape' || k === 'Back' || k === 'Backspace' || k === 'GoBack') {
+    if (isBack(c, k)) {
       e.preventDefault();
+      if (panelKind) { closePanel(); return; }
+      if (barOn) { setBar(false); return; }
       if (window.history.length > 1) window.history.back();
       else window.location.href = '/';
       return;
     }
 
     fullscreenOnce();
-    if ((c === 13 || k === 'Enter' || k === 'OK' || k === 'Select') && document.activeElement === document.body) {
+
+    // Panel takes every key while it is open — except the two shortcuts, which
+    // switch sheets instead of forcing a close first.
+    if (panelKind) {
+      if (k === 's' || k === 'S') { e.preventDefault(); openPanel('quality'); return; }
+      if (k === 'c' || k === 'C') { e.preventDefault(); openPanel('comments'); return; }
+      var rows = panelBody.querySelectorAll('button.row');
+      if (isUp(c, k) || isDown(c, k)) {
+        e.preventDefault();
+        if (rows.length) {
+          var idx = Array.prototype.indexOf.call(rows, document.activeElement);
+          var delta = isDown(c, k) ? 1 : -1;
+          if (idx < 0) idx = delta > 0 ? -1 : 0;
+          var nxt = rows[Math.max(0, Math.min(rows.length - 1, idx + delta))];
+          if (nxt) nxt.focus();
+        } else {
+          panelBody.scrollTop += isDown(c, k) ? 320 : -320;
+        }
+        return;
+      }
+      if (isOk(c, k)) {
+        e.preventDefault();
+        if (document.activeElement && document.activeElement.className.indexOf('row') >= 0) {
+          document.activeElement.click();
+        } else if (rows.length) {
+          rows[0].focus();
+        }
+        return;
+      }
+      return;
+    }
+
+    // Control bar visible: arrows move between buttons, Enter activates.
+    if (barOn) {
+      var bi = ctlBtns.indexOf(document.activeElement);
+      if (isLeft(c, k)) { e.preventDefault(); focusBtn(bi < 0 ? 0 : bi - 1); return; }
+      if (isRight(c, k)) { e.preventDefault(); focusBtn(bi < 0 ? 0 : bi + 1); return; }
+      if (isUp(c, k) || isDown(c, k)) { e.preventDefault(); setBar(false); return; }
+      if (isOk(c, k)) {
+        e.preventDefault();
+        if (bi >= 0) ctlBtns[bi].click();
+        else focusBtn(0);
+        return;
+      }
+    }
+
+    if (isUp(c, k) || isDown(c, k)) {
+      e.preventDefault();
+      chrome();
+      focusBtn(0);
+      return;
+    }
+    if (isLeft(c, k)) { e.preventDefault(); seek(-10); return; }
+    if (isRight(c, k)) { e.preventDefault(); seek(10); return; }
+
+    if (isOk(c, k) || k === ' ' || k === 'Spacebar' || c === 32) {
       e.preventDefault();
       toggle();
       return;
     }
-    if (k === ' ' || k === 'Spacebar' || c === 32) {
-      e.preventDefault();
+    if (c === 179 || c === 415 || c === 10252 || k === 'MediaPlayPause' || k === 'Play' || k === 'MediaPlay') {
       toggle();
       return;
     }
-    if (c === 179 || c === 415 || c === 10252 || k === 'MediaPlayPause' || k === 'Play' || k === 'MediaPlay') { toggle(); return; }
     if (c === 19 || c === 178 || k === 'MediaStop' || k === 'Pause') {
       if (!v.paused) toggle();
       return;
     }
-    if (c === 37 || k === 'ArrowLeft' || k === 'Left') { e.preventDefault(); seek(-10); return; }
-    if (c === 39 || k === 'ArrowRight' || k === 'Right') { e.preventDefault(); seek(10); return; }
-    if (c === 38 || c === 40 || k === 'ArrowUp' || k === 'ArrowDown' || k === 'Up' || k === 'Down') {
-      e.preventDefault();
-      showChrome();
-      return;
-    }
+    if (k === 's' || k === 'S') { e.preventDefault(); openPanel('quality'); return; }
+    if (k === 'c' || k === 'C') { e.preventDefault(); openPanel('comments'); return; }
     if (k === 'f' || k === 'F') { fullscreen(); return; }
-    showChrome();
+
+    chrome();
   });
 
-  document.addEventListener('click', showChrome);
-  document.addEventListener('mousemove', showChrome);
-  window.addEventListener('load', function () { showChrome(); });
+  document.addEventListener('click', function (e) {
+    if (e.target === v) return;
+    chrome();
+  });
+  document.addEventListener('mousemove', chrome);
+  window.addEventListener('load', function () { chrome(); });
 
+  syncPlayLabel();
   load();
 })();
 `;
-
 const LOGIN_JS = `
 (function () {
   var codeEl = document.getElementById('code');
@@ -898,7 +1252,7 @@ async function handle(req, res) {
 
   if (path === '/diag') {
     const body = `<h1>TV diagnostics</h1>
-      <p class="hint">Runs playback tests in this TV's browser. Takes about 30 seconds.</p>
+      <p class="hint">Runs playback tests in this TV's browser. Takes about 40 seconds. When it finishes, open <code>/logs</code> to send me the results.</p>
       <pre id="out" class="diagout">starting…</pre>
       <div id="videos" class="diagvideos"></div>
       <script>${DIAG_JS}</script>`;
@@ -1000,6 +1354,37 @@ async function handle(req, res) {
     }
   }
 
+  // --- quality list (cogwheel) -------------------------------------------
+  if (path === '/api/qualities') {
+    const id = url.searchParams.get('id') || '';
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return json(res, 400, { error: 'bad video id' });
+    try {
+      return json(res, 200, await resolveQualities(id));
+    } catch (e) {
+      log('qualities ERR', id, String(e.message).slice(0, 120));
+      return json(res, 502, { error: 'formats unavailable' });
+    }
+  }
+
+  // --- comments ----------------------------------------------------------
+  if (path === '/api/comments') {
+    const id = url.searchParams.get('id') || '';
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return json(res, 400, { error: 'bad video id' });
+    const token = url.searchParams.get('token') || '';
+    try {
+      const p = await yt.commentsPage(id, token);
+      if (p.disabled) return json(res, 200, { html: '', token: null, n: 0, error: 'comments off' });
+      return json(res, 200, {
+        html: p.comments.map(comment).join(''),
+        token: p.token,
+        n: p.comments.length,
+      });
+    } catch (e) {
+      log('comments ERR', id, String(e.message).slice(0, 140));
+      return json(res, 502, { error: 'comments unavailable' });
+    }
+  }
+
   // --- continuation (infinite scroll) ------------------------------------
   if (path === '/api/more') {
     const kind = url.searchParams.get('kind') || 'home';
@@ -1093,20 +1478,53 @@ async function handle(req, res) {
     const id = url.searchParams.get('id') || '';
     if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return errorPage(res, new Error('Bad video id'), 400);
     const body = `<div class="watch">
-      <div class="ov" id="ov">
-        <button class="btn" id="back" onclick="history.back()">← Back</button>
+      <video id="v" autoplay muted playsinline webkit-playsinline x5-playsinline preload="auto"></video>
+      <audio id="a" preload="auto" muted></audio>
+      <div class="ov hide" id="ov">
+        <button class="btn" id="back">← Back</button>
         <h1 id="title">Loading…</h1>
       </div>
-      <video id="v" autoplay playsinline webkit-playsinline x5-playsinline preload="auto"></video>
-      <audio id="a" preload="auto"></audio>
+      <div class="ovb hide" id="ovb">
+        <div class="prog" id="prog"><div id="progfill"></div></div>
+        <div class="btns">
+          <button class="ctl" id="ctlplay">Pause</button>
+          <button class="ctl" id="ctlgear">Quality</button>
+          <button class="ctl" id="ctlcmt">Comments</button>
+        </div>
+      </div>
       <button id="start" class="start">▶ Play</button>
       <div class="hud hide" id="hud"></div>
       <div class="clock" id="clock"></div>
+      <div class="panel hide" id="panel" tabindex="-1">
+        <div class="panel-head">
+          <span id="paneltitle">Quality</span>
+          <span class="panel-hint">Back to close</span>
+        </div>
+        <div class="panel-body" id="panelbody"></div>
+      </div>
       <div class="err" id="err" style="display:none"></div>
-      <p class="hint">OK play/pause · ← → seek 10s · Back to grid · F fullscreen</p>
     </div>
     <script>${PLAYER_JS}</script>`;
     return html(res, 200, page({ title: 'Watch', body, active: '', signedIn: yt.signedIn(), cinema: true }));
+  }
+
+  if (path === '/comments') {
+    const id = url.searchParams.get('id') || '';
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return errorPage(res, new Error('Bad video id'), 400);
+    let p = { comments: [], token: null };
+    let msg = '';
+    try {
+      p = await yt.commentsPage(id);
+    } catch (e) {
+      msg = 'Could not load comments.';
+      log('comments page ERR', id, String(e.message).slice(0, 120));
+    }
+    const body = `<h1>Comments</h1>
+      <p class="hint"><a class="btn" href="/watch?id=${esc(id)}">← Back to video</a></p>
+      ${msg ? `<div class="empty">${esc(msg)}</div>` : ''}
+      ${p.disabled ? '<div class="empty">Comments are disabled for this video.</div>' : ''}
+      <div class="cmtlist">${p.comments.map(comment).join('')}</div>`;
+    return html(res, 200, page({ title: 'Comments', body, active: '', signedIn: yt.signedIn() }));
   }
 
   if (path === '/search') {
@@ -1185,6 +1603,8 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, HOST, () => {
   log('start', `build ${BUILD}`, `port ${PORT}`);
+  log('start', `yt-dlp ${ytdlpBinary()}`);
+  ytdlpVersion().then((v) => log('start', `yt-dlp version ${v}`));
   const nets = os.networkInterfaces();
   const lan = [];
   for (const name of Object.keys(nets)) {

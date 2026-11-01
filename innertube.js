@@ -49,6 +49,126 @@ async function api(endpoint, body) {
   return r.json();
 }
 
+// Comments are read with the web client: the TV surface does not expose them,
+// and reading public comments needs no account.
+const WEB_CLIENT = {
+  clientName: 'WEB',
+  clientVersion: '2.20250101.00.00',
+  hl: HL,
+  gl: GL,
+};
+
+async function apiWeb(endpoint, body) {
+  const headers = {
+    'content-type': 'application/json',
+    'user-agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    origin: 'https://www.youtube.com',
+    referer: 'https://www.youtube.com/',
+    'accept-language': `${HL}-${GL},${HL};q=0.9`,
+    'x-youtube-client-name': '1',
+    'x-youtube-client-version': WEB_CLIENT.clientVersion,
+  };
+  const r = await fetch(`https://www.youtube.com${endpoint}?prettyPrint=false`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ context: { client: WEB_CLIENT }, ...body }),
+  });
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    throw new Error(`InnerTube ${endpoint} ${r.status}: ${t.slice(0, 160)}`);
+  }
+  return r.json();
+}
+
+function firstToken(root) {
+  let found = null;
+  const walk = (n, depth) => {
+    if (found || !n || typeof n !== 'object' || depth > 20) return;
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x, depth + 1);
+      return;
+    }
+    if (typeof n.continuationCommand?.token === 'string') {
+      found = n.continuationCommand.token;
+      return;
+    }
+    for (const k of Object.keys(n)) walk(n[k], depth + 1);
+  };
+  walk(root, 0);
+  return found;
+}
+
+function commentsPanelToken(root) {
+  for (const p of root.engagementPanels || []) {
+    const s = p.engagementPanelSectionListRenderer;
+    if (s && s.panelIdentifier === 'engagement-panel-comments-section') return firstToken(s);
+  }
+  return null;
+}
+
+// The page-tail token sits on the last continuationItemRenderer of the
+// continuation response; reply tokens live inside individual threads.
+function nextCommentsToken(root) {
+  const eps = root.onResponseReceivedEndpoints || [];
+  for (let i = eps.length - 1; i >= 0; i--) {
+    const cmd = eps[i].reloadContinuationItemsCommand || eps[i].appendContinuationItemsAction;
+    const items = cmd?.continuationItems || [];
+    for (let k = items.length - 1; k >= 0; k--) {
+      const t = items[k].continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token;
+      if (t) return t;
+    }
+  }
+  return null;
+}
+
+function commentPayloads(root) {
+  const out = [];
+  const seen = new Set();
+  const walk = (n, depth) => {
+    if (!n || typeof n !== 'object' || depth > 26) return;
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x, depth + 1);
+      return;
+    }
+    const p = n.commentEntityPayload;
+    if (p && p.properties && !seen.has(p.properties.commentId)) {
+      seen.add(p.properties.commentId);
+      out.push(p);
+    }
+    for (const k of Object.keys(n)) walk(n[k], depth + 1);
+  };
+  walk(root, 0);
+  return out;
+}
+
+export async function commentsPage(videoId, token) {
+  let tok = token;
+  if (!tok) {
+    const first = await apiWeb('/youtubei/v1/next', { videoId });
+    tok = commentsPanelToken(first);
+    if (!tok) return { comments: [], token: null, disabled: true };
+  }
+
+  const j = await apiWeb('/youtubei/v1/next', { continuation: tok });
+  const comments = [];
+  for (const c of commentPayloads(j)) {
+    const text = c.properties?.content?.content || '';
+    if (!text) continue;
+    comments.push({
+      id: c.properties.commentId,
+      author: c.author?.displayName || '',
+      text,
+      published: c.properties.publishedTime || '',
+      likes: c.toolbar?.likeCountNotliked || c.toolbar?.likeCountLiked || '',
+      replies: c.toolbar?.replyCount || '',
+      pinned: !!c.properties.pinnedText,
+      owner: !!c.author?.isCreator,
+    });
+  }
+  return { comments, token: nextCommentsToken(j), disabled: false };
+}
+
 function text(v) {
   if (!v) return '';
   if (typeof v === 'string') return v;
