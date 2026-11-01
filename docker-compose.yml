@@ -5,6 +5,8 @@ services:
       args:
         YTDLP_VERSION: "2026.10.26"
     image: tubetv:latest
+    # `tubetv` is built locally, never pulled from a registry.
+    pull_policy: build
     container_name: tubetv
     restart: unless-stopped
     # 8099 is already taken on this Pi by another container, so publish 8484.

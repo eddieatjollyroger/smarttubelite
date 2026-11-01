@@ -4,17 +4,39 @@ A tiny self-hosted YouTube front end for TVs that can't run SmartTube — specif
 Hisense/Toshiba **VIDAA**, Samsung Tizen, LG webOS, or any old browser.
 
 It uses YouTube's official TV device-code sign-in, pulls your real home feed
-(`FEwhat_to_watch`) and subscriptions from InnerTube, and plays video with `yt-dlp`.
-No YouTube player code is loaded, so there are no ads to block.
+(`FEwhat_to_watch`), subscriptions and watch history from InnerTube, and plays video
+with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
 
 ## What you get
 
 - Your actual recommendation feed (logged in), not a "trending" page
-- Subscriptions feed
+- Subscriptions and watch **history** feeds
 - Search
+- Endless scrolling: reaching the last row loads the next page automatically
 - H.264/AAC playback forced, so old TV browsers can decode it
+- Videos open fullscreen and autoplay (falls back to muted autoplay + one OK press for sound)
+- Quality cascade 1080p → 720p → 480p → compatible file, and it remembers what your
+  TV could decode so later videos start there
+- Livestreams, played as HLS through a built-in relay (no native HLS required)
 - Remote-friendly UI: big tiles, arrow-key spatial navigation
 - No ads, no tracking pixels, no YouTube player
+
+## Remote controls
+
+| Key | Grid / search | Player |
+|---|---|---|
+| ← → ↑ ↓ | move between tiles and nav links | seek ∓10 s / show controls |
+| OK / Enter | open the focused item | play / pause (first OK also unmutes) |
+| Back / Backspace / Esc | previous page | back to the grid |
+| Play/Pause | — | play / pause |
+| F | — | toggle fullscreen |
+
+The player is cinema-style: no page chrome, no native control bar, video fills the
+screen. The overlay, status pill and clock fade out after a few seconds of playback
+and come back on any key. Clicking/tapping the picture also play-pauses.
+
+If a TV cannot decode a stream it steps down automatically. The chosen tier is stored
+in the browser; open `/watch?id=…&h=1080` to forget it and try again at 1080p.
 
 ## Requirements
 
@@ -30,6 +52,30 @@ No YouTube player code is loaded, so there are no ads to block.
 cd smarttube-lite
 docker compose up -d --build
 ```
+
+If you already run other containers with `network_mode: host`, add this instead of
+publishing a port:
+
+```yaml
+services:
+  tubetv:
+    build:
+      context: /mnt/ssd1/tubetv/smarttubelite
+    pull_policy: build
+    container_name: tubetv
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: "8484"
+      HOST: "0.0.0.0"
+      YT_GL: "PT"
+      TZ: "Atlantic/Azores"
+    volumes:
+      - /mnt/ssd1/tubetv/data:/app/data
+```
+
+Then `docker compose up -d --build tubetv`. Confirm the running build at
+`http://<pi>:8484/healthz`.
 
 Serves on **port 8484** (`TUBETV_PORT=9000 docker compose up -d` to change). The
 container downloads the matching `yt-dlp` for its architecture at build time and
@@ -110,8 +156,37 @@ TV), so budget ~2× the video bitrate. Gigabit ethernet is plenty.
 
 - **LAN only.** There is no authentication on the server itself. Do not port-forward it.
 - A plain-Node host must stay awake (`caffeinate -i ./run.sh` on macOS; systemd on Linux).
-- Only the first page of each feed is loaded (no infinite scroll / continuations yet).
+- Only the first ~60 cards are rendered by the server; more arrive on demand through
+  YouTube's continuation tokens. If YouTube has nothing new, the grid simply stops.
 - No Shorts, no comments, no channel pages, no casting.
 - Unofficial: uses InnerTube and a public OAuth client. Google can change either at any time.
-- 1080p H.264 max. VIDAA's browser usually can't do VP9/AV1 or 4K.
+- Only 1080p H.264. VIDAA's browser usually can't do VP9/AV1 or 4K.
+- 1080p is H.264 *High* profile; many TV decoders only do *Main*. That is why the
+  player steps down to 720p, which YouTube serves as Main profile (`avc1.4D401F`).
 - Audio and video are separate DASH streams synced in the page; if they drift, pause/play once.
+- Livestreams need `MediaSource` in the TV browser (hls.js). Old VIDAA builds without it
+  cannot play them — `/diag` tells you which case you have.
+
+## Diagnostics
+
+If a video won't play on the TV, open `http://<host>:8484/diag` **on the TV**. It
+reports the browser's user agent, `MediaSource`, codec support and fullscreen, then
+runs six playback tests (direct mp4 → proxied mp4 → `/api/play` → YouTube video →
+YouTube audio → video+audio pair, the same layout the player uses). Results are also
+posted to the server log.
+
+`http://<host>:8484/logs` shows the last 250 server log lines — every `/api/play`
+and `/api/media` request, with the TV's user agent, HTTP status, range and size.
+
+The player also logs quality tiers, autoplay blocks, decode errors, stalls and HLS
+errors, so the first failure is visible in `/logs` without reproducing it.
+
+Troubleshooting order, when the TV fails but a desktop browser works:
+
+1. Run `/diag` **on the TV**. "1. direct mp4" failing means the TV browser or the
+   network path is the problem, not this app.
+2. "2. proxied mp4" failing while 1 passes means proxy/port/firewall trouble.
+3. "4. youtube video" failing while 1–2 pass means codec/profile (try `h=720`, which
+   the player does automatically).
+4. No `media` lines in `/logs` at all while pressing play on the TV means the request
+   never left the TV (DNS, IP, port, or the app is pointed at the wrong URL).

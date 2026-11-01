@@ -1,3 +1,21 @@
+2026-11-01 05:21:42 start build 2026-11-01.1 port 8484
 TubeTV running
   local:   http://localhost:8484
   TV:      http://192.168.1.126:8484
+2026-11-01 05:21:42 client player video-error id=sF80I-TQiW0 {"code":2,"rs":4,"ns":1,"tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:21:42 client player step-down id=sF80I-TQiW0 {"why":"video-2","tier":1} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:21:42 client player request id=sF80I-TQiW0 {"tier":1,"q":"/api/play?id=sF80I-TQiW0&h=720"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:21:44 play ok sF80I-TQiW0 h720 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:21:44 client player attached id=sF80I-TQiW0 {"tier":1,"h":720,"audio":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:21:44 media 206 bytes=0- 3696026363 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:21:44 media 206 bytes=0- 693075727 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:21:50 client player request id=sF80I-TQiW0 {"tier":0,"q":"/api/play?id=sF80I-TQiW0&h=1080"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:21:52 play ok sF80I-TQiW0 h1080 1080p avc1.640028 mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:21:52 client player attached id=sF80I-TQiW0 {"tier":0,"h":1080,"audio":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:21:52 media 206 bytes=0- 693075727 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:21:52 media 206 bytes=0- 19354287418 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:22:02 media 206 bytes=44761088- 19309526330 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:22:02 media 206 bytes=1638400- 691437327 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:22:17 client player request id=0sfDth4lMLc {"tier":0,"q":"/api/play?id=0sfDth4lMLc&h=1080"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:22:19 play live 0sfDth4lMLc Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-01 05:22:19 client player live-attach id=0sfDth4lMLc {"hasMSE":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea

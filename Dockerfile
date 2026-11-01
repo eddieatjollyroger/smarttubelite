@@ -23,6 +23,7 @@ WORKDIR /app
 COPY package.json ./
 COPY server.js ./
 COPY lib ./lib
+COPY public ./public
 RUN mkdir -p /app/data
 
 ENV PORT=8484 \
