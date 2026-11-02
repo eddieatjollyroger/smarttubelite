@@ -8,6 +8,7 @@ import * as auth from './lib/auth.js';
 import * as yt from './lib/innertube.js';
 import {
   resolve as resolveStream,
+  resolveHls as resolveHlsStream,
   qualities as resolveQualities,
   binary as ytdlpBinary,
   version as ytdlpVersion,
@@ -17,7 +18,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-02.2';
+const BUILD = '2026-11-02.3';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -25,6 +26,9 @@ const UA =
 // Resolved googlevideo URLs are IP-locked and expire. Keep them server-side and
 // hand the browser short opaque paths instead.
 const tokens = new Map();
+// HLS/MSI player sessions: video+audio playlist URLs plus the metadata needed to
+// build a master playlist with one <video> element on the client.
+const hlsTokens = new Map();
 
 // Small in-memory ring buffer so the TV's behaviour can be inspected from a
 // Mac (`/logs`) or with `docker compose logs`, without SSHing around.
@@ -39,6 +43,14 @@ function log(...parts) {
 
 function ua(req) {
   return String(req.headers['user-agent'] || '?').slice(0, 90);
+}
+
+function makeHlsToken(info) {
+  const t = crypto.randomBytes(12).toString('hex');
+  hlsTokens.set(t, { ...info, at: Date.now() });
+  const timer = setTimeout(() => hlsTokens.delete(t), 6 * 60 * 60 * 1000);
+  if (timer.unref) timer.unref();
+  return t;
 }
 
 function makeToken({ video, audio, id = '', height = 0, muxed = false }) {
@@ -595,6 +607,33 @@ async function handle(req, res) {
     }
   }
 
+  // Master playlist for VOD MSE playback: one video variant + one audio group,
+  // so hls.js can feed a single <video> element.
+  if (path === '/api/hls/master') {
+    const entry = hlsTokens.get(url.searchParams.get('tok') || '');
+    if (!entry) return json(res, 410, { error: 'stream expired' });
+    const wrap = (u) => `/api/hls?u=${b64u(u)}`;
+    const bw = Math.max(300000, Math.round((entry.tbr || 2000) * 1000));
+    const resTag = entry.width && entry.height
+      ? `RESOLUTION=${entry.width}x${entry.height},`
+      : '';
+    const codecs = [entry.vcodec, entry.acodec].filter(Boolean).join(',');
+    const body = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:3',
+      `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Default",DEFAULT=YES,AUTOSELECT=YES,URI="${wrap(entry.audioPlaylist)}"`,
+      `#EXT-X-STREAM-INF:BANDWIDTH=${bw},${resTag}CODECS="${codecs}",AUDIO="aud"`,
+      wrap(entry.videoPlaylist),
+      '',
+    ].join('\n');
+    res.writeHead(200, {
+      'content-type': 'application/vnd.apple.mpegurl',
+      'cache-control': 'no-store',
+      'content-length': Buffer.byteLength(body),
+    });
+    return res.end(body);
+  }
+
   if (path === '/api/hls') {
     return proxyHls(req, res, unb64u(url.searchParams.get('u') || ''));
   }
@@ -640,7 +679,37 @@ async function handle(req, res) {
     if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return json(res, 400, { error: 'bad video id' });
     const muxed = url.searchParams.get('muxed') === '1';
     const fresh = url.searchParams.get('fresh') === '1';
+    const useHls = url.searchParams.get('hls') === '1';
+    const prefetch = url.searchParams.get('prefetch') === '1';
     const h = Math.min(1080, Math.max(360, Number(url.searchParams.get('h')) || 1080));
+
+    // Preferred path for TV browsers: one <video> element via MSE, with hls.js
+    // reading a video playlist and an audio playlist. No second media element
+    // and no giant open-ended progressive download.
+    if (useHls) {
+      try {
+        const info = await resolveHlsStream(id, { height: h, fresh });
+        if (!info.live) {
+          if (prefetch) return json(res, 200, { ok: true, mode: 'mse', height: info.height });
+          const tok = makeHlsToken(info);
+          log('play hls', id, `${info.height}p`, info.vcodec, info.acodec, ua(req));
+          return json(res, 200, {
+            title: info.title,
+            duration: info.duration,
+            hls: `/api/hls/master?tok=${tok}`,
+            height: info.height,
+            width: info.width,
+            vcodec: info.vcodec,
+            acodec: info.acodec,
+            mode: 'mse',
+          });
+        }
+        // Livestream: use the proven live manifest path below.
+      } catch (e) {
+        log('hls ERR', id, String(e.message).slice(0, 100), ua(req));
+      }
+    }
+
     try {
       const info = await resolveStream(id, { muxed, height: h, fresh });
       if (info.live) {
@@ -652,6 +721,7 @@ async function handle(req, res) {
           height: 0,
         });
       }
+      if (prefetch) return json(res, 200, { ok: true, mode: 'split', height: info.height });
       const tok = makeToken({
         video: info.video,
         audio: info.audio,
@@ -676,6 +746,7 @@ async function handle(req, res) {
         height: info.height,
         vcodec: info.vcodec || null,
         acodec: info.acodec || null,
+        mode: 'split',
       });
     } catch (e) {
       log('play ERR', id, e.code || '', String(e.message).slice(0, 120), ua(req));

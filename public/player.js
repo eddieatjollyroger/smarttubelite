@@ -28,7 +28,7 @@
   var panelBody = document.getElementById('panelbody');
   var stage = document.getElementById('stage');
 
-  var tiers = [{ h: 1080 }, { h: 720 }, { h: 480 }, { h: 360 }, { muxed: 1 }];
+  var tiers = [{ h: 720 }, { h: 480 }, { h: 360 }, { muxed: 1 }];
   var tier = 0;
   var resumeAt = 0;
   var userPaused = false;
@@ -42,6 +42,9 @@
   var started = false;
   var isLive = false;
   var hls = null;
+  var hlsOff = false;
+  var hlsFatalRetries = 0;
+  var hlsFatalBusy = false;
   var watchdog = null;
   var id = '';
   var active = false;
@@ -55,8 +58,68 @@
   var forceFresh = false;
   var lastAnchor = null;
   var pushed = false;
+  var lastScroll = 0;
+  var prefetchTimer = null;
+  var prefetchId = '';
+  var prefetchBusy = false;
+  var prefetchQueued = '';
 
   var CINEMA_PAGE = document.body.classList.contains('cinema');
+
+  // The tile OK press is a real user gesture. If it is still active when the
+  // stream is ready, start with sound instead of muting first and unmuting late
+  // (VIDAA dislikes that dance). Prefetching keeps the gap short.
+  function hasGesture() {
+    try {
+      return !!(navigator.userActivation && navigator.userActivation.isActive);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Highest quality first, then everything below it, then the split fallback.
+  function makeTiers(top) {
+    var out = [{ h: top }];
+    var all = [1080, 720, 480, 360];
+    for (var i = 0; i < all.length; i++) {
+      if (all[i] < top) out.push({ h: all[i] });
+    }
+    out.push({ muxed: 1 });
+    return out;
+  }
+
+  // Warm the server's yt-dlp cache while the viewer browses the grid. The real
+  // play request shares the in-flight resolve, so OK starts almost instantly.
+  function prefetchHeight() {
+    var t = tiers[tier] || tiers[0] || { h: 720 };
+    return t.h || 720;
+  }
+
+  function prefetch(vid) {
+    if (!vid || vid === prefetchId) return;
+    // One yt-dlp run at a time on the Pi; remember only the latest tile the
+    // remote stopped on.
+    if (prefetchBusy) { prefetchQueued = vid; return; }
+    prefetchId = vid;
+    prefetchBusy = true;
+    var u = '/api/play?prefetch=1&hls=1&id=' + encodeURIComponent(vid) +
+      '&h=' + prefetchHeight();
+    var done = function () {
+      prefetchBusy = false;
+      var next = prefetchQueued;
+      prefetchQueued = '';
+      if (next && next !== prefetchId) prefetch(next);
+    };
+    try {
+      fetch(u, { cache: 'no-store' }).then(done, done);
+    } catch (e) { done(); }
+  }
+
+  function schedulePrefetch(vid) {
+    if (!vid || vid === prefetchId) return;
+    if (prefetchTimer) clearTimeout(prefetchTimer);
+    prefetchTimer = setTimeout(function () { prefetch(vid); }, 300);
+  }
 
   function report(kind, data) {
     try {
@@ -193,6 +256,14 @@
 
   function maybeUnmute() {
     if (!v.muted || soundBlocked) return;
+    // Never turn sound on after the OK gesture has expired. That late unmute is
+    // exactly what preceded VIDAA's media-stack hang; instead keep playing
+    // (muted is always allowed) and let one OK press enable sound.
+    if (!hasGesture()) {
+      soundBlocked = true;
+      hint('Sound off — press OK for sound', true);
+      return;
+    }
     v.muted = false;
     if (a.src) { a.muted = false; a.volume = v.volume; }
     setTimeout(function () {
@@ -201,7 +272,7 @@
         v.muted = true;
         if (a.src) a.muted = true;
         retryMuted();
-        hint('Sound needs one press — OK to unmute', true);
+        hint('Sound off — press OK for sound', true);
       }
     }, 700);
   }
@@ -238,11 +309,11 @@
     audioGaveUp = false;
     ttl.textContent = info.title || id;
     document.title = (info.title || 'TubeTV') + ' · TubeTV';
-    v.muted = true;
+    v.muted = !hasGesture();
     v.src = info.video;
     if (info.audio) {
       a.src = info.audio;
-      a.muted = true;
+      a.muted = v.muted;
       a.volume = v.volume;
     }
     report('attached', { tier: tier, h: info.height, codec: info.vcodec, audio: !!info.audio, mode: active ? 'overlay' : 'page' });
@@ -261,70 +332,140 @@
     document.head.appendChild(s);
   }
 
-  function attachLive(info) {
+  function attachHls(info, live) {
     started = true;
-    isLive = true;
-    ttl.textContent = info.title || 'Live';
-    document.title = (info.title || 'Live') + ' · TubeTV';
-    prog.style.display = 'none';
-    hint('LIVE', true);
-    report('live-attach', { hasMSE: typeof window.MediaSource !== 'undefined' });
+    isLive = !!live;
+    ttl.textContent = info.title || (live ? 'Live' : id);
+    document.title = (info.title || (live ? 'Live' : 'TubeTV')) + ' · TubeTV';
+    prog.style.display = live ? 'none' : 'block';
+    if (live) hint('LIVE', true);
+    v.muted = !hasGesture();
+    report(live ? 'live-attach' : 'hls-attach', {
+      hasMSE: typeof window.MediaSource !== 'undefined',
+      h: info.height,
+      mode: info.mode
+    });
+
+    function fallback(why) {
+      if (live) return;
+      hlsOff = true;
+      resumeAt = lastTime || v.currentTime || 0;
+      report('hls-fallback', { why: why, at: resumeAt });
+      loadSeq++;
+      teardown();
+      userPaused = false;
+      load();
+    }
 
     if (window.MediaSource) {
       loadHlsJs(function () {
         if (!window.Hls || !window.Hls.isSupported()) {
-          showErr('This browser has MediaSource but hls.js cannot use it.');
+          if (live) showErr('This browser has MediaSource but hls.js cannot use it.');
+          else fallback('unsupported');
           return;
         }
-        hls = new window.Hls({
-          liveSyncDurationCount: 3,
+        var cfg = {
           enableWorker: false,
           lowLatencyMode: false,
           capLevelToPlayerSize: true,
-          abrEwmaDefaultEstimate: 2000000
-        });
+          abrEwmaDefaultEstimate: 2000000,
+          // TV browsers have little spare memory. Keep the MSE buffer small;
+          // hls.js evicts old fragments as playback advances.
+          maxBufferLength: 20,
+          maxMaxBufferLength: 30,
+          backBufferLength: 30,
+          maxBufferSize: 40 * 1000 * 1000
+        };
+        if (live) cfg.liveSyncDurationCount = 3;
+        hls = new window.Hls(cfg);
         hls.on(window.Hls.Events.ERROR, function (ev, data) {
           report('hls-error', { type: data.type, details: data.details, fatal: !!data.fatal });
-          if (!data.fatal) return;
-          if (data.type === 'networkError') { hls.startLoad(); return; }
-          if (data.type === 'mediaError') { hls.recoverMediaError(); return; }
-          showErr('Live stream failed: ' + data.details);
+          if (!data.fatal) {
+            // A single bad fragment is normal; hls.js retries on its own.
+            if (data.type === 'mediaError') {
+              try { hls.recoverMediaError(); } catch (e) {}
+            }
+            return;
+          }
+          if (hlsFatalBusy) return;
+
+          if (isLive) {
+            if (data.type === 'networkError') { try { hls.startLoad(); } catch (e) {} return; }
+            if (data.type === 'mediaError') { try { hls.recoverMediaError(); } catch (e) {} return; }
+            showErr('Live stream failed: ' + data.details);
+            return;
+          }
+
+          // VOD: a stale playlist URL is the most common fatal error. Re-resolve
+          // once, then give up on MSE and use the split fallback at the same
+          // position rather than losing the viewer's place.
+          hlsFatalBusy = true;
+          if (hlsFatalRetries < 1) {
+            hlsFatalRetries++;
+            resumeAt = lastTime || v.currentTime || 0;
+            report('hls-retry', { details: data.details, at: resumeAt });
+            setTimeout(function () {
+              loadSeq++;
+              teardown();
+              hlsFatalBusy = false;
+              forceFresh = true;
+              userPaused = false;
+              load();
+            }, 0);
+            return;
+          }
+          report('hls-fatal', { details: data.details });
+          setTimeout(function () {
+            hlsFatalBusy = false;
+            fallback(data.details || 'fatal');
+          }, 0);
         });
         hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
-          // Start on the best level that isn't 4K, then hand control back to the
-          // adaptive switcher so a slow link can still step down.
-          var best = 0, bestH = 0;
-          for (var i = 0; i < hls.levels.length; i++) {
-            var lh = hls.levels[i].height || 0;
-            if (lh <= 1080 && lh >= bestH) { bestH = lh; best = i; }
+          if (live) {
+            // Start on the best level that isn't 4K, then hand control back to
+            // the adaptive switcher so a slow link can still step down.
+            var best = 0, bestH = 0;
+            for (var i = 0; i < hls.levels.length; i++) {
+              var lh = hls.levels[i].height || 0;
+              if (lh <= 1080 && lh >= bestH) { bestH = lh; best = i; }
+            }
+            if (bestH > 0) {
+              try { hls.startLevel = best; } catch (e) {}
+              try { hls.currentLevel = best; } catch (e) {}
+              setTimeout(function () {
+                try { hls.currentLevel = -1; } catch (e) {}
+              }, 10000);
+            }
+          } else if (resumeAt > 1) {
+            try { v.currentTime = resumeAt; } catch (e) {}
           }
-          if (bestH > 0) {
-            try { hls.startLevel = best; } catch (e) {}
-            try { hls.currentLevel = best; } catch (e) {}
-            setTimeout(function () {
-              try { hls.currentLevel = -1; } catch (e) {}
-            }, 10000);
-          }
+          startWatchdog();
           tryPlay();
           chrome();
+          if (!live) setTimeout(fullscreen, 600);
         });
         hls.attachMedia(v);
         hls.loadSource(info.hls);
-        hint('LIVE — starting…', true);
+        hint(live ? 'LIVE — starting…' : 'Starting…', !!live);
       });
-    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
+    } else if (live && v.canPlayType('application/vnd.apple.mpegurl')) {
       v.src = info.hls;
       tryPlay();
       chrome();
-    } else {
+    } else if (live) {
       showErr('This TV browser cannot play livestreams (no MediaSource / HLS support).');
+    } else {
+      fallback('no-mse');
     }
   }
 
   function load() {
     err.style.display = 'none';
-    var t = tiers[tier];
-    var q = '/api/play?id=' + encodeURIComponent(id) + (t.muxed ? '&muxed=1' : '&h=' + t.h) +
+    var t = tiers[tier] || { h: 720 };
+    var useHls = !t.muxed && !hlsOff;
+    var q = '/api/play?id=' + encodeURIComponent(id) +
+      (t.muxed ? '&muxed=1' : '&h=' + (t.h || 720)) +
+      (useHls ? '&hls=1' : '') +
       (forceFresh ? '&fresh=1' : '');
     forceFresh = false;
     report('request', { tier: tier, q: q });
@@ -333,12 +474,20 @@
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (x) {
         if (seq !== loadSeq) return;
-        if (x.j && x.j.live && x.j.hls) { attachLive(x.j); return; }
-        if (!x.ok || x.j.error || !x.j.video) {
-          showErr(x.j.error || 'Could not load this video.');
+        var j = x.j || {};
+        if (j.live && j.hls) { attachHls(j, true); return; }
+        if (j.hls && (j.mode === 'mse' || !j.video)) { attachHls(j, false); return; }
+        // The server fell back to the split path because this video has no HLS
+        // pair (or HLS failed). Do not pay for the HLS probe again per tier.
+        if (useHls && j.video) {
+          hlsOff = true;
+          report('hls-unavailable', { h: j.height, mode: j.mode });
+        }
+        if (!x.ok || j.error || !j.video) {
+          showErr(j.error || 'Could not load this video.');
           return;
         }
-        attach(x.j);
+        attach(j);
       })
       .catch(function (e) { if (seq === loadSeq) showErr('Request failed: ' + e); });
   }
@@ -371,7 +520,10 @@
     try { localStorage.setItem('tubetv.h', String(h)); } catch (e) {}
     resumeAt = v.currentTime || 0;
     lastTime = resumeAt;
-    tiers[tier] = { h: h };
+    tiers = makeTiers(h);
+    tier = 0;
+    hlsOff = false;
+    hlsFatalRetries = 0;
     closePanel();
     restart();
     hint('Quality: ' + h + 'p', true);
@@ -445,7 +597,7 @@
             (hs[i] === tiers[tier].h ? '<span class="chk">current</span>' : '') + '</button>';
         }
         if (!html) html = '<div class="pnote">No selectable formats for this video.</div>';
-        html += '<button class="row" id="qauto"><span>Automatic</span><span class="chk">start high, step down</span></button>';
+        html += '<button class="row" id="qauto"><span>Automatic</span><span class="chk">720p, step down</span></button>';
         panelBody.innerHTML = html;
 
         var rows = panelBody.querySelectorAll('button[data-h]');
@@ -458,10 +610,13 @@
         if (auto) {
           auto.addEventListener('click', function () {
             try { localStorage.removeItem('tubetv.h'); } catch (e) {}
-            tiers[tier] = { h: 1080 };
+            tiers = makeTiers(720);
+            tier = 0;
+            hlsOff = false;
+            hlsFatalRetries = 0;
             closePanel();
             restart();
-            hint('Quality: automatic', true);
+            hint('Quality: automatic (720p)', true);
           });
         }
         var first = panelBody.querySelector('button.row');
@@ -523,6 +678,7 @@
   });
   v.addEventListener('playing', function () {
     startBtn.style.display = 'none';
+    if (!isLive && hud.textContent === 'Starting…') hud.className = 'hud hide';
     if (isLive) { lastClock = ''; updateClock(); hint('LIVE', true); }
     if (!a.src) return;
     if (Math.abs(a.currentTime - v.currentTime) > 0.25) {
@@ -686,6 +842,9 @@
     var code = e ? e.code : 0;
     report('video-error', { code: code, rs: v.readyState, ns: v.networkState, tier: tier });
     if (switching) return;
+    // hls.js owns the media element in MSE mode; its ERROR handler decides
+    // whether to retry, recover, or fall back.
+    if (hls) return;
     if (!isLive && started && freshRetries < 1) {
       freshRetries++;
       report('src-refresh', { why: 'video-' + code, tier: tier });
@@ -802,19 +961,29 @@
     audioRetries = 0;
     audioGaveUp = false;
     forceFresh = false;
+    hlsOff = false;
+    hlsFatalRetries = 0;
+    hlsFatalBusy = false;
     loadSeq++;
     lastAnchor = anchor || lastAnchor;
-    // Same preference order as before: ?h=, then the manual pick, then the
-    // cascade position this TV settled on.
+    lastScroll = window.pageYOffset || 0;
+    prefetchId = id2;
+    // One-time migration: older builds saved a forced split quality (often
+    // 720p) and a tier position that would bypass the new single-pipeline HLS
+    // path. Clear it so the TV starts on the safer MSE path once.
+    try {
+      if (localStorage.getItem('tubetv.prefver') !== '2') {
+        localStorage.removeItem('tubetv.h');
+        localStorage.removeItem('tubetv.tier');
+        localStorage.setItem('tubetv.prefver', '2');
+      }
+    } catch (e) {}
+    // ?h=/manual pick wins, then the cascade position this TV settled on.
     try {
       var savedH = parseInt(localStorage.getItem('tubetv.h') || '', 10);
       var saved = parseInt(localStorage.getItem('tubetv.tier') || '', 10);
-      if (savedH) {
-        tiers = [{ h: savedH }, { h: 720 }, { h: 480 }, { h: 360 }, { muxed: 1 }];
-      } else {
-        tiers = [{ h: 1080 }, { h: 720 }, { h: 480 }, { h: 360 }, { muxed: 1 }];
-        if (saved > 0 && saved < tiers.length) tier = saved;
-      }
+      tiers = makeTiers(savedH || 720);
+      if (!savedH && saved > 0 && saved < tiers.length) tier = saved;
     } catch (e) {}
     if (stage) stage.className = 'stage';
     document.body.classList.add('cinema');
@@ -835,6 +1004,10 @@
       document.body.classList.remove('cinema');
       document.body.classList.remove('watch-open');
       document.documentElement.style.overflow = '';
+      var sy = lastScroll || 0;
+      (window.requestAnimationFrame || setTimeout)(function () {
+        try { window.scrollTo(0, sy); } catch (e) {}
+      });
       if (lastAnchor) { try { lastAnchor.focus(); } catch (e) {} }
       else { try { document.activeElement.blur(); } catch (e) {} }
     }
@@ -908,6 +1081,18 @@
       return;
     }
 
+    // Sound-off is the most common first interaction after a cold autoplay.
+    // Make OK turn sound on from anywhere except a focused control or sheet row.
+    if (isOk(c, k) && v.muted && !v.paused &&
+        startBtn.style.display === 'none' &&
+        ctlBtns.indexOf(document.activeElement) < 0) {
+      e.preventDefault();
+      unmute();
+      hint('Sound on');
+      chrome();
+      return;
+    }
+
     // Control bar visible: arrows move between buttons, Enter activates.
     if (barOn) {
       var bi = ctlBtns.indexOf(document.activeElement);
@@ -960,6 +1145,23 @@
 
   // --- grid integration -------------------------------------------------
   if (stage) {
+    // Warm the stream for whichever tile the remote is sitting on.
+    document.addEventListener('focusin', function (e) {
+      if (active) return;
+      var el = e.target;
+      if (!el || el.tagName !== 'A') return;
+      var m = /^\/watch\?(?:.*&)?id=([A-Za-z0-9_-]{11})/.exec(el.getAttribute('href') || '');
+      if (m) schedulePrefetch(m[1]);
+    }, true);
+
+    window.addEventListener('load', function () {
+      if (active) return;
+      var first = document.querySelector('.card');
+      if (!first) return;
+      var m = /^\/watch\?(?:.*&)?id=([A-Za-z0-9_-]{11})/.exec(first.getAttribute('href') || '');
+      if (m) setTimeout(function () { if (!active) prefetch(m[1]); }, 250);
+    });
+
     document.addEventListener('click', function (e) {
       if (active) return;
       var el = e.target;
@@ -1002,7 +1204,7 @@
         var qh = parseInt(new URLSearchParams(location.search).get('h') || '', 10);
         if (qh) {
           localStorage.removeItem('tubetv.tier');
-          tiers = [{ h: qh }, { h: 720 }, { h: 480 }, { h: 360 }, { muxed: 1 }];
+          tiers = makeTiers(qh);
         }
       } catch (e) {}
       resetChrome();

@@ -1,14 +1,100 @@
-2026-11-02 01:33:04 start build 2026-11-02.2 port 8484
-2026-11-02 01:33:04 start yt-dlp /Users/joaopacheco/smarttube-lite/bin/yt-dlp
+2026-11-02 02:14:35 start build 2026-11-02.3 port 8484
+2026-11-02 02:14:35 start yt-dlp /Users/joaopacheco/smarttube-lite/bin/yt-dlp
 TubeTV running
   local:   http://localhost:8484
   TV:      http://192.168.1.126:8484
-2026-11-02 01:33:04 start yt-dlp version 2026.10.26
-2026-11-02 01:33:14 client player open id=vt0i6nuqNEo {"id":"vt0i6nuqNEo","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-02 01:33:14 client player request id=vt0i6nuqNEo {"tier":0,"q":"/api/play?id=vt0i6nuqNEo&h=1080"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-02 01:33:16 play ok vt0i6nuqNEo h1080 1080p avc1.640028 mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-02 01:33:16 client player attached id=vt0i6nuqNEo {"tier":0,"h":1080,"codec":"avc1.640028","audio":true,"mode":"overlay"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-02 01:33:16 media 206 bytes=0- 62865163 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-02 01:33:16 media 206 bytes=0- 3733571 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-02 01:33:16 client player playing id=vt0i6nuqNEo {"tier":0,"muted":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-02 01:33:17 client player fullscreen id=vt0i6nuqNEo {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:35 start yt-dlp version 2026.10.26
+2026-11-02 02:14:43 client player open id=vt0i6nuqNEo {"id":"vt0i6nuqNEo","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:43 client player request id=vt0i6nuqNEo {"tier":0,"q":"/api/play?id=vt0i6nuqNEo&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:43 play hls vt0i6nuqNEo 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:43 client player hls-attach id=vt0i6nuqNEo {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:44 client player playing id=vt0i6nuqNEo {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:44 client player fullscreen id=vt0i6nuqNEo {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:49 client player panel id=vt0i6nuqNEo {"kind":"quality"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:49 client player fullscreen id=vt0i6nuqNEo {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:55 client player open id=BeE80qH8Exc {"id":"BeE80qH8Exc","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:55 client player request id=BeE80qH8Exc {"tier":0,"q":"/api/play?id=BeE80qH8Exc&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:57 play hls BeE80qH8Exc 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:57 client player hls-attach id=BeE80qH8Exc {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:57 client player playing id=BeE80qH8Exc {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:14:57 client player fullscreen id=BeE80qH8Exc {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:14 client player open id=r8o9npHJi_k {"id":"r8o9npHJi_k","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:14 client player request id=r8o9npHJi_k {"tier":0,"q":"/api/play?id=r8o9npHJi_k&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:16 play hls r8o9npHJi_k 720p avc1.640020 mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:16 client player hls-attach id=r8o9npHJi_k {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:16 client player fullscreen id=r8o9npHJi_k {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:17 client player playing id=r8o9npHJi_k {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:19 client player panel id=r8o9npHJi_k {"kind":"quality"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:19 client player fullscreen id=r8o9npHJi_k {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:49 client player open id=vt0i6nuqNEo {"id":"vt0i6nuqNEo","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:49 client player request id=vt0i6nuqNEo {"tier":0,"q":"/api/play?id=vt0i6nuqNEo&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:49 play hls vt0i6nuqNEo 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:49 client player hls-attach id=vt0i6nuqNEo {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:49 client player playing id=vt0i6nuqNEo {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:15:49 client player fullscreen id=vt0i6nuqNEo {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:08 client player open id=vt0i6nuqNEo {"id":"vt0i6nuqNEo","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:08 client player request id=vt0i6nuqNEo {"tier":0,"q":"/api/play?id=vt0i6nuqNEo&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:10 play ok vt0i6nuqNEo h720 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:10 client player hls-unavailable id=vt0i6nuqNEo {"h":720,"mode":"split"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:10 client player attached id=vt0i6nuqNEo {"tier":0,"h":720,"codec":"avc1.4D401F","audio":true,"mode":"overlay"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:10 media 206 bytes=0- 25781944 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:10 media 206 bytes=0- 3733571 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:10 client player playing id=vt0i6nuqNEo {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:11 client player fullscreen id=vt0i6nuqNEo {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:29 client player open id=vt0i6nuqNEo {"id":"vt0i6nuqNEo","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:29 client player request id=vt0i6nuqNEo {"tier":0,"q":"/api/play?id=vt0i6nuqNEo&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:29 play hls vt0i6nuqNEo 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:29 client player hls-attach id=vt0i6nuqNEo {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:29 client player hls-error id=vt0i6nuqNEo {"type":"networkError","details":"manifestLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:29 client player hls-retry id=vt0i6nuqNEo {"details":"manifestLoadError","at":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:29 client player request id=vt0i6nuqNEo {"tier":0,"q":"/api/play?id=vt0i6nuqNEo&h=720&hls=1&fresh=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:31 play hls vt0i6nuqNEo 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:31 client player hls-attach id=vt0i6nuqNEo {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:31 client player hls-error id=vt0i6nuqNEo {"type":"networkError","details":"manifestLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:31 client player hls-fatal id=vt0i6nuqNEo {"details":"manifestLoadError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:31 client player hls-fallback id=vt0i6nuqNEo {"why":"manifestLoadError","at":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:31 client player request id=vt0i6nuqNEo {"tier":0,"q":"/api/play?id=vt0i6nuqNEo&h=720"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:31 play ok vt0i6nuqNEo h720 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:31 client player attached id=vt0i6nuqNEo {"tier":0,"h":720,"codec":"avc1.4D401F","audio":true,"mode":"overlay"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:31 media 206 bytes=0- 25781944 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:31 media 206 bytes=0- 3733571 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:32 client player playing id=vt0i6nuqNEo {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:32 client player fullscreen id=vt0i6nuqNEo {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:16:54 play hls r8o9npHJi_k 720p avc1.640020 mp4a.40.2 curl/8.1.2
+2026-11-02 02:17:01 client player open id=BeE80qH8Exc {"id":"BeE80qH8Exc","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:01 client player request id=BeE80qH8Exc {"tier":0,"q":"/api/play?id=BeE80qH8Exc&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:01 play hls BeE80qH8Exc 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:01 client player hls-attach id=BeE80qH8Exc {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:01 client player playing id=BeE80qH8Exc {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:01 client player fullscreen id=BeE80qH8Exc {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:10 client player open id=RuXPeVJp7Ck {"id":"RuXPeVJp7Ck","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:10 client player request id=RuXPeVJp7Ck {"tier":0,"q":"/api/play?id=RuXPeVJp7Ck&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:14 play hls RuXPeVJp7Ck 640p avc1.4D401E mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:14 client player hls-attach id=RuXPeVJp7Ck {"hasMSE":true,"h":640,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:14 client player playing id=RuXPeVJp7Ck {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:14 client player fullscreen id=RuXPeVJp7Ck {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:23 client player open id=aqz-KE-bpKQ {"id":"aqz-KE-bpKQ","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:23 client player request id=aqz-KE-bpKQ {"tier":0,"q":"/api/play?id=aqz-KE-bpKQ&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:23 play hls aqz-KE-bpKQ 720p avc1.4D4020 mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:23 client player hls-attach id=aqz-KE-bpKQ {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:24 client player playing id=aqz-KE-bpKQ {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:24 client player fullscreen id=aqz-KE-bpKQ {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:40 client player open id=vt0i6nuqNEo {"id":"vt0i6nuqNEo","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:40 client player request id=vt0i6nuqNEo {"tier":0,"q":"/api/play?id=vt0i6nuqNEo&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:40 play hls vt0i6nuqNEo 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:40 client player hls-attach id=vt0i6nuqNEo {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:41 client player playing id=vt0i6nuqNEo {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:41 client player fullscreen id=vt0i6nuqNEo {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:45 client player panel id=vt0i6nuqNEo {"kind":"comments"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:17:45 client player fullscreen id=vt0i6nuqNEo {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:18:49 client player open id=vt0i6nuqNEo {"id":"vt0i6nuqNEo","mode":"overlay","tier":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:18:49 client player request id=vt0i6nuqNEo {"tier":0,"q":"/api/play?id=vt0i6nuqNEo&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:18:49 play hls vt0i6nuqNEo 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:18:49 client player hls-attach id=vt0i6nuqNEo {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:18:49 client player playing id=vt0i6nuqNEo {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:18:49 client player fullscreen id=vt0i6nuqNEo {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:19:19 client player request id=BeE80qH8Exc {"tier":0,"q":"/api/play?id=BeE80qH8Exc&h=720&hls=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:19:19 play hls BeE80qH8Exc 720p avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:19:19 client player hls-attach id=BeE80qH8Exc {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:19:19 client player playing id=BeE80qH8Exc {"tier":0,"muted":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-02 02:19:20 client player fullscreen id=BeE80qH8Exc {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea

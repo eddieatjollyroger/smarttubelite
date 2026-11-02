@@ -57,10 +57,20 @@ it uses the same player script.
 The player is cinema-style: video fills the screen and the title/control bars fade
 out after a few seconds; any key brings them back. The **Quality** sheet lists only
 the resolutions that video has and remembers your pick; **Automatic** goes back to
-the 1080p-first cascade. The container starts muted so playback is never blocked,
-then sound is switched on in the same gesture window; if the browser still refuses,
-playback continues muted and one OK press turns the sound on. Clicking/tapping the
-picture also play-pauses.
+the 720p-first cascade. Clicking/tapping the picture also play-pauses.
+
+VOD uses a single MSE pipeline: YouTube's H.264 **HLS video playlist** plus its
+matching **audio playlist** are fed to hls.js, which presents one `<video>` element.
+The old split progressive path (a video element *and* a separate audio element,
+often with a 100 MB+ open-ended download) is what wedged VIDAA's media stack, so it
+is now only a fallback for videos with no HLS pair. Livestreams already used this
+single-element HLS path.
+
+Tiles are prefetched 300 ms after the remote stops on them, and the prefetch shares
+the same in-flight `yt-dlp` run as the play request. That removes most of the 10 s+
+resolve gap: if the OK gesture is still active when the stream is ready, playback
+starts **unmuted immediately**. If the gesture is gone, it starts muted (always
+allowed) and one OK press turns the sound on.
 
 If something pauses the stream on its own (the browser's autoplay policy, a stalled
 fragment, a decoder reset) the player resumes it, the way a set-top box does. It
@@ -76,6 +86,8 @@ dropping the resolution for no reason.
 If a TV cannot decode a stream it steps down automatically. The chosen tier is stored
 in the browser; open `/watch?id=…&h=1080` to forget it and try again at 1080p. Your own
 quality pick from the menu is remembered separately (`tubetv.h`); **Automatic** clears it.
+Build `2026-11-02.3` also clears the old forced-split quality/tier once (marker
+`tubetv.prefver`), so a TV that previously wedged starts on the HLS path.
 
 ## Requirements
 
@@ -115,6 +127,20 @@ services:
 
 Then `docker compose up -d --build tubetv`. Confirm the running build at
 `http://<pi>:8484/healthz`.
+
+### Deploying from a laptop
+
+`./deploy.sh` rsyncs the source to the Pi (never touching its `data/`, so sign-in
+survives) and rebuilds the container:
+
+```sh
+./deploy.sh                    # pi@192.168.1.69
+./deploy.sh joao@192.168.1.69  # explicit user
+```
+
+It finishes by polling `/healthz` and fails loudly if the build is not the expected
+one. Give the Pi a DHCP reservation in the router: when its address changes, the
+TV's bookmark points at a dead host.
 
 Serves on **port 8484** (`TUBETV_PORT=9000 docker compose up -d` to change). The
 container downloads the matching `yt-dlp` for its architecture at build time and
