@@ -12,12 +12,12 @@ import {
   binary as ytdlpBinary,
   version as ytdlpVersion,
 } from './lib/ytdlp.js';
-import { page, grid, card, comment, esc } from './lib/ui.js';
+import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-01.3';
+const BUILD = '2026-11-02.2';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -41,9 +41,9 @@ function ua(req) {
   return String(req.headers['user-agent'] || '?').slice(0, 90);
 }
 
-function makeToken({ video, audio }) {
+function makeToken({ video, audio, id = '', height = 0, muxed = false }) {
   const t = crypto.randomBytes(12).toString('hex');
-  tokens.set(t, { video, audio, at: Date.now() });
+  tokens.set(t, { video, audio, id, height, muxed, at: Date.now() });
   const timer = setTimeout(() => tokens.delete(t), 6 * 60 * 60 * 1000);
   if (timer.unref) timer.unref();
   return t;
@@ -94,7 +94,7 @@ function errorPage(res, err, status = 500) {
   );
 }
 
-async function proxyMedia(req, res, url, hostOk = /(^|\.)googlevideo\.com$/) {
+async function proxyMedia(req, res, url, hostOk = /(^|\.)googlevideo\.com$/, retry) {
   let target;
   try {
     target = new URL(url);
@@ -112,21 +112,54 @@ async function proxyMedia(req, res, url, hostOk = /(^|\.)googlevideo\.com$/) {
   if (req.headers.range) headers.range = req.headers.range;
   if (req.headers['if-range']) headers['if-range'] = req.headers['if-range'];
 
-  const ac = new AbortController();
-  const abort = setTimeout(() => ac.abort(), 20_000);
+  async function fetchUp(raw) {
+    const ac = new AbortController();
+    const abort = setTimeout(() => ac.abort(), 20_000);
+    try {
+      const up = await fetch(raw, {
+        method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+        headers,
+        signal: ac.signal,
+      });
+      clearTimeout(abort);
+      return up;
+    } finally {
+      clearTimeout(abort);
+    }
+  }
+
   let upstream;
   try {
-    upstream = await fetch(url, {
-      method: req.method === 'HEAD' ? 'HEAD' : 'GET',
-      headers,
-      signal: ac.signal,
-    });
+    upstream = await fetchUp(url);
   } catch (e) {
-    clearTimeout(abort);
     log('media ERR', target.hostname, e.name || e.message, ua(req));
     return json(res, 502, { error: 'upstream fetch failed: ' + e.message });
   }
-  clearTimeout(abort);
+
+  // googlevideo URLs are IP-locked and can go stale inside our cache window.
+  // Re-resolve once rather than handing the TV a dead stream (which looks like
+  // a codec failure and makes the player step the quality down for no reason).
+  if (retry && (upstream.status === 403 || upstream.status === 404 || upstream.status === 410)) {
+    try {
+      await upstream.body?.cancel();
+    } catch {}
+    let next = null;
+    try {
+      next = await retry();
+    } catch (e) {
+      log('media retry ERR', String(e.message || e).slice(0, 100), ua(req));
+    }
+    if (!next) return json(res, 502, { error: 'stream unavailable' });
+    try {
+      target = new URL(next);
+      if (!hostOk.test(target.hostname)) throw new Error('host not allowed');
+      upstream = await fetchUp(next);
+      log('media refreshed', upstream.status, target.hostname, ua(req));
+    } catch (e) {
+      log('media retry ERR', String(e.message || e).slice(0, 100), ua(req));
+      return json(res, 502, { error: 'upstream retry failed' });
+    }
+  }
 
   log(
     'media',
@@ -441,739 +474,6 @@ const DIAG_JS = `
 })();
 `;
 
-const PLAYER_JS = `
-(function () {
-  var params = new URLSearchParams(location.search);
-  var id = params.get('id');
-  var v = document.getElementById('v');
-  var a = document.getElementById('a');
-  var err = document.getElementById('err');
-  var ttl = document.getElementById('title');
-  var startBtn = document.getElementById('start');
-  var hud = document.getElementById('hud');
-  var ov = document.getElementById('ov');
-  var bar = document.getElementById('ovb');
-  var clock = document.getElementById('clock');
-  var prog = document.getElementById('prog');
-  var progfill = document.getElementById('progfill');
-  var playBtn = document.getElementById('ctlplay');
-  var gearBtn = document.getElementById('ctlgear');
-  var cmtBtn = document.getElementById('ctlcmt');
-  var ctlBtns = [playBtn, gearBtn, cmtBtn];
-  var panel = document.getElementById('panel');
-  var panelTitle = document.getElementById('paneltitle');
-  var panelBody = document.getElementById('panelbody');
-
-  var tiers = [{ h: 1080 }, { h: 720 }, { h: 480 }, { h: 360 }, { muxed: 1 }];
-  var tier = 0;
-  var resumeAt = 0;
-  var userPaused = false;
-  var soundBlocked = false;
-  var hideTimer = null;
-  var barOn = false;
-  var panelKind = null;
-  var cmtToken = null;
-  var cmtLoading = false;
-  var lastClock = '';
-  var started = false;
-  var isLive = false;
-  var hls = null;
-  var watchdog = null;
-
-  // Highest quality that worked last time (cascade), or an explicit pick from
-  // the quality menu (tubetv.h), or a one-off override in the URL (?h=720).
-  try {
-    var qh = parseInt(params.get('h') || '', 10);
-    var savedH = parseInt(localStorage.getItem('tubetv.h') || '', 10);
-    if (qh) {
-      localStorage.removeItem('tubetv.tier');
-      tiers[0] = { h: qh };
-      tier = 0;
-    } else if (savedH) {
-      tiers[0] = { h: savedH };
-      tier = 0;
-    } else {
-      var saved = parseInt(localStorage.getItem('tubetv.tier') || '', 10);
-      if (saved > 0 && saved < tiers.length) tier = saved;
-    }
-  } catch (e) {}
-
-  function report(kind, data) {
-    try {
-      fetch('/api/log', {
-        method: 'POST',
-        headers: { 'content-type': 'text/plain' },
-        body: 'player ' + kind + ' id=' + id + ' ' + JSON.stringify(data || {})
-      });
-    } catch (e) {}
-  }
-
-  function errName(code) {
-    return { 1: 'aborted', 2: 'network error', 3: 'decode error', 4: 'source not supported' }[code] || 'unknown';
-  }
-
-  function showErr(msg) {
-    err.textContent = msg;
-    err.style.display = 'block';
-    report('error', { msg: msg, tier: tier, rs: v.readyState, ns: v.networkState,
-      code: v.error ? v.error.code : 0, acode: a.error ? a.error.code : 0 });
-  }
-
-  function hint(msg, sticky) {
-    hud.textContent = msg;
-    hud.className = 'hud';
-    if (hideTimer) clearTimeout(hideTimer);
-    if (!sticky) hideTimer = setTimeout(function () { hud.className = 'hud hide'; }, 5000);
-  }
-
-  function fmt(s) {
-    s = Math.floor(s || 0);
-    var m = Math.floor(s / 60), r = s % 60;
-    return m + ':' + (r < 10 ? '0' : '') + r;
-  }
-
-  // --- chrome (title bar + control bar) ---------------------------------
-  function setBar(on) {
-    barOn = on;
-    ov.className = on ? 'ov' : 'ov hide';
-    bar.className = on ? 'ovb' : 'ovb hide';
-    if (!on) {
-      try { document.activeElement.blur(); } catch (e) {}
-    }
-  }
-
-  function chrome() {
-    setBar(true);
-    if (hideTimer) clearTimeout(hideTimer);
-    hideTimer = setTimeout(function () {
-      if (!v.paused && !panelKind) setBar(false);
-    }, 5000);
-  }
-
-  function focusBtn(i) {
-    if (i < 0) i = 0;
-    if (i > ctlBtns.length - 1) i = ctlBtns.length - 1;
-    var b = ctlBtns[i];
-    if (b) b.focus();
-  }
-
-  function syncPlayLabel() {
-    playBtn.textContent = v.paused ? 'Play' : 'Pause';
-  }
-
-  function fullscreen() {
-    var el = document.documentElement;
-    var fn = el.requestFullscreen || el.webkitRequestFullscreen ||
-             el.mozRequestFullScreen || el.msRequestFullscreen;
-    if (!fn) return false;
-    try {
-      var p = fn.call(el);
-      if (p && p.catch) p.catch(function () {});
-      return true;
-    } catch (e) { return false; }
-  }
-
-  // TV browsers normally require a user gesture before real fullscreen; the
-  // first remote key press counts as one.
-  var fsTried = false;
-  function fullscreenOnce() {
-    if (fsTried || document.fullscreenElement || document.webkitFullscreenElement) return;
-    fsTried = true;
-    fullscreen();
-  }
-
-  // --- playback ---------------------------------------------------------
-  // Always start muted: browsers allow that without a gesture, so playback
-  // begins on its own like a real player app. Then try to switch sound on.
-  function tryPlay() {
-    var p;
-    try { p = v.play(); } catch (e) { p = null; }
-    if (!p || !p.then) {
-      startBtn.style.display = 'none';
-      maybeUnmute();
-      return;
-    }
-    p.then(function () {
-      startBtn.style.display = 'none';
-      report('playing', { tier: tier, muted: v.muted });
-      maybeUnmute();
-    }).catch(function (e) {
-      startBtn.style.display = 'inline-block';
-      report('autoplay-blocked', { name: (e && e.name) || '?' });
-    });
-  }
-
-  function maybeUnmute() {
-    if (!v.muted || soundBlocked) return;
-    v.muted = false;
-    if (a.src) { a.muted = false; a.volume = v.volume; }
-    setTimeout(function () {
-      if (v.paused) {
-        soundBlocked = true;
-        v.muted = true;
-        if (a.src) a.muted = true;
-        try { v.play(); } catch (e) {}
-        hint('Sound needs one press — OK to unmute', true);
-      }
-    }, 600);
-  }
-
-  function unmute() {
-    soundBlocked = false;
-    v.muted = false;
-    if (a.src) { a.muted = false; a.volume = v.volume; }
-  }
-
-  function attach(info) {
-    started = true;
-    ttl.textContent = info.title || id;
-    document.title = (info.title || 'TubeTV') + ' · TubeTV';
-    v.muted = true;
-    v.src = info.video;
-    if (info.audio) {
-      a.src = info.audio;
-      a.muted = true;
-      a.volume = v.volume;
-    }
-    report('attached', { tier: tier, h: info.height, codec: info.vcodec, audio: !!info.audio });
-    startWatchdog();
-    tryPlay();
-    chrome();
-    // Fullscreen usually needs a gesture; this is a free attempt on TV browsers
-    // that allow it, and a CSS full-bleed layout covers the ones that don't.
-    setTimeout(fullscreen, 400);
-  }
-
-  function loadHlsJs(cb) {
-    if (window.Hls) return cb();
-    var s = document.createElement('script');
-    s.src = '/hls.js';
-    s.onload = cb;
-    s.onerror = function () { showErr('Could not load the live player (hls.js).'); };
-    document.head.appendChild(s);
-  }
-
-  function attachLive(info) {
-    started = true;
-    isLive = true;
-    ttl.textContent = info.title || 'Live';
-    document.title = (info.title || 'Live') + ' · TubeTV';
-    prog.style.display = 'none';
-    hint('LIVE', true);
-    report('live-attach', { hasMSE: typeof window.MediaSource !== 'undefined' });
-
-    if (window.MediaSource) {
-      loadHlsJs(function () {
-        if (!window.Hls || !window.Hls.isSupported()) {
-          showErr('This browser has MediaSource but hls.js cannot use it.');
-          return;
-        }
-        hls = new window.Hls({
-          liveSyncDurationCount: 3,
-          enableWorker: false,
-          lowLatencyMode: false,
-          capLevelToPlayerSize: true,
-          abrEwmaDefaultEstimate: 2000000
-        });
-        hls.on(window.Hls.Events.ERROR, function (ev, data) {
-          report('hls-error', { type: data.type, details: data.details, fatal: !!data.fatal });
-          if (!data.fatal) return;
-          if (data.type === 'networkError') { hls.startLoad(); return; }
-          if (data.type === 'mediaError') { hls.recoverMediaError(); return; }
-          showErr('Live stream failed: ' + data.details);
-        });
-        hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
-          // Start on the best level that isn't 4K, then hand control back to the
-          // adaptive switcher so a slow link can still step down.
-          var best = 0, bestH = 0;
-          for (var i = 0; i < hls.levels.length; i++) {
-            var lh = hls.levels[i].height || 0;
-            if (lh <= 1080 && lh >= bestH) { bestH = lh; best = i; }
-          }
-          if (bestH > 0) {
-            try { hls.startLevel = best; } catch (e) {}
-            try { hls.currentLevel = best; } catch (e) {}
-            setTimeout(function () {
-              try { hls.currentLevel = -1; } catch (e) {}
-            }, 10000);
-          }
-          tryPlay();
-          chrome();
-        });
-        hls.attachMedia(v);
-        hls.loadSource(info.hls);
-        hint('LIVE — starting…', true);
-      });
-    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-      v.src = info.hls;
-      tryPlay();
-      chrome();
-    } else {
-      showErr('This TV browser cannot play livestreams (no MediaSource / HLS support).');
-    }
-  }
-
-  function load() {
-    err.style.display = 'none';
-    var t = tiers[tier];
-    var q = '/api/play?id=' + encodeURIComponent(id) + (t.muxed ? '&muxed=1' : '&h=' + t.h);
-    report('request', { tier: tier, q: q });
-    fetch(q)
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (x) {
-        if (x.j && x.j.live && x.j.hls) { attachLive(x.j); return; }
-        if (!x.ok || x.j.error || !x.j.video) {
-          showErr(x.j.error || 'Could not load this video.');
-          return;
-        }
-        attach(x.j);
-      })
-      .catch(function (e) { showErr('Request failed: ' + e); });
-  }
-
-  function restart() {
-    stopWatchdog();
-    userPaused = false;
-    err.style.display = 'none';
-    startBtn.style.display = 'none';
-    try { a.pause(); a.removeAttribute('src'); a.load(); } catch (e) {}
-    try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
-    load();
-  }
-
-  function setQuality(h) {
-    try { localStorage.setItem('tubetv.h', String(h)); } catch (e) {}
-    resumeAt = v.currentTime || 0;
-    tiers[tier] = { h: h };
-    closePanel();
-    restart();
-    hint('Quality: ' + h + 'p', true);
-  }
-
-  function seek(delta) {
-    if (isLive) { hint('Live stream — no seeking', true); return; }
-    try {
-      v.currentTime = Math.max(0, v.currentTime + delta);
-      if (a.src) a.currentTime = v.currentTime;
-    } catch (e) {}
-    hint((delta > 0 ? '+' : '') + delta + 's · ' + fmt(v.currentTime), true);
-    chrome();
-  }
-
-  function toggle() {
-    if (startBtn.style.display !== 'none') { startBtn.click(); return; }
-    if (v.muted && !v.paused) { unmute(); hint('Sound on'); chrome(); return; }
-    if (v.paused) {
-      userPaused = false;
-      unmute();
-      var p = v.play();
-      if (p && p.catch) p.catch(function () { startBtn.style.display = 'inline-block'; });
-      if (a.src) a.play().catch(function () {});
-      hint('Playing');
-    } else {
-      userPaused = true;
-      v.pause();
-      hint('Paused');
-    }
-    syncPlayLabel();
-    chrome();
-  }
-
-  // --- panels (quality / comments) --------------------------------------
-  function openPanel(kind) {
-    panelKind = kind;
-    panel.className = 'panel ' + (kind === 'comments' ? 'cmt' : 'qual');
-    panelBody.scrollTop = 0;
-    if (hideTimer) clearTimeout(hideTimer);
-    setBar(false);
-    if (kind === 'quality') renderQuality();
-    else renderComments(true);
-    try { panel.focus(); } catch (e) {}
-    report('panel', { kind: kind });
-  }
-
-  function closePanel() {
-    panelKind = null;
-    panel.className = 'panel hide';
-    panelBody.innerHTML = '';
-    try { document.activeElement.blur(); } catch (e) {}
-    chrome();
-  }
-
-  function renderQuality() {
-    panelTitle.textContent = 'Quality';
-    panelBody.innerHTML = '<div class="pnote">Checking available formats…</div>';
-    fetch('/api/qualities?id=' + encodeURIComponent(id), { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        if (panelKind !== 'quality') return;
-        if (j && j.live) {
-          panelBody.innerHTML = '<div class="pnote">Livestream: quality follows the network automatically.</div>';
-          return;
-        }
-        var hs = (j && j.heights) || [];
-        var html = '';
-        for (var i = 0; i < hs.length; i++) {
-          html += '<button class="row" data-h="' + hs[i] + '"><span>' + hs[i] + 'p</span>' +
-            (hs[i] === tiers[tier].h ? '<span class="chk">current</span>' : '') + '</button>';
-        }
-        if (!html) html = '<div class="pnote">No selectable formats for this video.</div>';
-        html += '<button class="row" id="qauto"><span>Automatic</span><span class="chk">start high, step down</span></button>';
-        panelBody.innerHTML = html;
-
-        var rows = panelBody.querySelectorAll('button[data-h]');
-        for (var k = 0; k < rows.length; k++) {
-          rows[k].addEventListener('click', function () {
-            setQuality(parseInt(this.getAttribute('data-h'), 10));
-          });
-        }
-        var auto = document.getElementById('qauto');
-        if (auto) {
-          auto.addEventListener('click', function () {
-            try { localStorage.removeItem('tubetv.h'); } catch (e) {}
-            tiers[tier] = { h: 1080 };
-            closePanel();
-            restart();
-            hint('Quality: automatic', true);
-          });
-        }
-        var first = panelBody.querySelector('button.row');
-        if (first) first.focus();
-      })
-      .catch(function () {
-        if (panelKind === 'quality') panelBody.innerHTML = '<div class="pnote">Could not list formats.</div>';
-      });
-  }
-
-  function renderComments(reset) {
-    if (cmtLoading) return;
-    if (reset) {
-      panelTitle.textContent = 'Comments';
-      cmtToken = null;
-      panelBody.innerHTML = '<div class="pnote">Loading comments…</div>';
-    }
-    cmtLoading = true;
-    var u = '/api/comments?id=' + encodeURIComponent(id) +
-      (cmtToken ? '&token=' + encodeURIComponent(cmtToken) : '');
-    fetch(u, { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        cmtLoading = false;
-        if (panelKind !== 'comments') return;
-        if (reset) panelBody.innerHTML = '';
-        if (j && j.error) {
-          panelBody.innerHTML = '<div class="pnote">' +
-            (j.error === 'comments off' ? 'Comments are turned off for this video.' : 'Could not load comments.') +
-            '</div>';
-          return;
-        }
-        if (!j || !j.html) {
-          panelBody.innerHTML = '<div class="pnote">No comments yet.</div>';
-          return;
-        }
-        var box = document.createElement('div');
-        box.innerHTML = j.html;
-        while (box.firstChild) panelBody.appendChild(box.firstChild);
-        cmtToken = j.token || null;
-      })
-      .catch(function () {
-        cmtLoading = false;
-        if (panelKind === 'comments' && reset) {
-          panelBody.innerHTML = '<div class="pnote">Could not load comments.</div>';
-        }
-      });
-  }
-
-  panelBody.addEventListener('scroll', function () {
-    if (panelKind !== 'comments' || !cmtToken || cmtLoading) return;
-    if (panelBody.scrollTop + panelBody.clientHeight > panelBody.scrollHeight - 500) renderComments(false);
-  });
-
-  // --- audio/video sync -------------------------------------------------
-  v.addEventListener('play', function () {
-    if (a.src) a.play().catch(function () {});
-    syncPlayLabel();
-  });
-  v.addEventListener('playing', function () {
-    startBtn.style.display = 'none';
-    if (isLive) { lastClock = ''; updateClock(); hint('LIVE', true); }
-    if (!a.src) return;
-    if (Math.abs(a.currentTime - v.currentTime) > 0.25) {
-      try { a.currentTime = v.currentTime; } catch (e) {}
-    }
-    a.play().catch(function () {});
-  });
-  v.addEventListener('pause', function () { a.pause(); syncPlayLabel(); chrome(); });
-  v.addEventListener('seeking', function () {
-    if (a.src) { try { a.currentTime = v.currentTime; } catch (e) {} }
-  });
-  v.addEventListener('timeupdate', function () {
-    if (a.src && !a.paused && Math.abs(a.currentTime - v.currentTime) > 0.3) {
-      try { a.currentTime = v.currentTime; } catch (e) {}
-    }
-  });
-  v.addEventListener('volumechange', function () { a.volume = v.volume; a.muted = v.muted; });
-  v.addEventListener('ratechange', function () { a.playbackRate = v.playbackRate; });
-  v.addEventListener('ended', function () { a.pause(); });
-
-  // --- clock + progress -------------------------------------------------
-  function updateClock() {
-    var s;
-    if (isLive) {
-      s = 'LIVE';
-    } else if (!isFinite(v.duration) || v.duration <= 0) {
-      s = fmt(v.currentTime);
-    } else {
-      s = fmt(v.currentTime) + ' / ' + fmt(v.duration) + '   −' + fmt(Math.max(0, v.duration - v.currentTime));
-    }
-    if (s !== lastClock) {
-      lastClock = s;
-      clock.textContent = s;
-    }
-    if (!isLive && isFinite(v.duration) && v.duration > 0 && progfill) {
-      progfill.style.width = Math.min(100, (v.currentTime / v.duration) * 100).toFixed(2) + '%';
-    }
-  }
-  v.addEventListener('timeupdate', updateClock);
-  v.addEventListener('durationchange', updateClock);
-  v.addEventListener('loadedmetadata', function () {
-    if (resumeAt > 1 && isFinite(v.duration) && resumeAt < v.duration - 5) {
-      try { v.currentTime = resumeAt; } catch (e) {}
-      if (a.src) { try { a.currentTime = resumeAt; } catch (e) {} }
-    }
-    resumeAt = 0;
-    updateClock();
-    // Some TV browsers only honour play() once metadata exists.
-    if (v.paused && !userPaused && startBtn.style.display === 'none') tryPlay();
-  });
-
-  // No native controls (they steal arrow keys on TV browsers) — tap/click the
-  // picture to play or pause.
-  v.addEventListener('click', function () { fullscreenOnce(); toggle(); });
-
-  // --- failure handling: step down quality, then give up with detail ----
-  function stopWatchdog() {
-    if (watchdog) {
-      clearInterval(watchdog);
-      watchdog = null;
-    }
-  }
-
-  function stepDown(why) {
-    if (isLive) return false;
-    if (tier >= tiers.length - 1) return false;
-    tier++;
-    // A frozen stream is the strongest signal that this TV's decoder (or its
-    // video-only pipeline) cannot handle the format, so remember the tier.
-    if (why === 'frozen' || why === 'stalled' || /^(video|audio)-[34]$/.test(why)) {
-      try { localStorage.setItem('tubetv.tier', String(tier)); } catch (e) {}
-    }
-    var t = tiers[tier];
-    hint('Trying ' + (t.muxed ? 'the compatible stream' : t.h + 'p') + '…', true);
-    report('step-down', { why: why, tier: tier });
-    stopWatchdog();
-    try { a.pause(); a.removeAttribute('src'); a.load(); } catch (e) {}
-    try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
-    tiers[tier] = tiers[tier] || { h: 480 };
-    load();
-    return true;
-  }
-
-  // Some TV browsers (including VIDAA) fetch a stream, report readyState 4 and
-  // then never advance the clock — no error, no frames, just a frozen picture.
-  // So the watchdog watches *progress*, not readiness.
-  function startWatchdog() {
-    stopWatchdog();
-    var lastT = -1;
-    var lastMove = Date.now();
-    var warned = false;
-
-    watchdog = setInterval(function () {
-      if (!started || isLive) return;
-      if (panelKind) { lastMove = Date.now(); return; }
-      // Waiting for the viewer to press OK is legitimate — not a stall.
-      if (startBtn && startBtn.style.display !== 'none') { lastMove = Date.now(); return; }
-      if (v.paused) { lastMove = Date.now(); return; }
-
-      var now = Date.now();
-      var t = v.currentTime || 0;
-      if (t > lastT + 0.05) {
-        lastT = t;
-        lastMove = now;
-        warned = false;
-        return;
-      }
-
-      var idle = now - lastMove;
-      // Not enough data yet is a network problem: give it longer.
-      var limit = v.readyState >= 3 ? 8000 : 20000;
-
-      if (!warned && idle > 4000) {
-        warned = true;
-        hint('Loaded, but playback is not starting — trying a compatible format…', true);
-        report('frozen', { rs: v.readyState, ns: v.networkState, tier: tier, t: t });
-      }
-
-      if (idle < limit) return;
-      if (stepDown(v.readyState >= 3 ? 'frozen' : 'stalled')) {
-        lastT = -1;
-        lastMove = Date.now();
-        warned = false;
-        return;
-      }
-      stopWatchdog();
-      showErr('This TV could not play any of the available formats (readyState ' +
-        v.readyState + ', networkState ' + v.networkState + '). Open /diag on this TV.');
-    }, 2000);
-  }
-
-  v.addEventListener('error', function () {
-    var e = v.error;
-    var code = e ? e.code : 0;
-    report('video-error', { code: code, rs: v.readyState, ns: v.networkState, tier: tier });
-    if (stepDown('video-' + code)) return;
-    showErr('Video failed (' + errName(code) + ', code ' + code +
-      '). Open /diag on this TV for details.');
-  });
-  a.addEventListener('error', function () {
-    var code = a.error ? a.error.code : 0;
-    report('audio-error', { code: code, tier: tier });
-    if (stepDown('audio-' + code)) return;
-    showErr('Audio failed (' + errName(code) + '). Video may still play.');
-  });
-
-  // --- buttons ----------------------------------------------------------
-  document.getElementById('back').addEventListener('click', function () {
-    if (window.history.length > 1) window.history.back();
-    else window.location.href = '/';
-  });
-  playBtn.addEventListener('click', toggle);
-  gearBtn.addEventListener('click', function () { openPanel('quality'); });
-  cmtBtn.addEventListener('click', function () { openPanel('comments'); });
-  startBtn.addEventListener('click', function () {
-    startBtn.style.display = 'none';
-    unmute();
-    var p = v.play();
-    if (p && p.catch) p.catch(function () {});
-    if (a.src) a.play().catch(function () {});
-    fullscreen();
-    chrome();
-    syncPlayLabel();
-  });
-
-  // --- remote keys ------------------------------------------------------
-  function isBack(c, k) {
-    return c === 8 || c === 27 || c === 4 || c === 461 || c === 10009 ||
-      k === 'Escape' || k === 'Back' || k === 'Backspace' || k === 'GoBack';
-  }
-  function isUp(c, k) { return c === 38 || k === 'ArrowUp' || k === 'Up'; }
-  function isDown(c, k) { return c === 40 || k === 'ArrowDown' || k === 'Down'; }
-  function isLeft(c, k) { return c === 37 || k === 'ArrowLeft' || k === 'Left'; }
-  function isRight(c, k) { return c === 39 || k === 'ArrowRight' || k === 'Right'; }
-  function isOk(c, k) {
-    return c === 13 || c === 23 || k === 'Enter' || k === 'OK' || k === 'Select' || k === 'Accept';
-  }
-
-  document.addEventListener('keydown', function (e) {
-    var k = e.key || '';
-    var c = e.keyCode || e.which || 0;
-
-    if (isBack(c, k)) {
-      e.preventDefault();
-      if (panelKind) { closePanel(); return; }
-      if (barOn) { setBar(false); return; }
-      if (window.history.length > 1) window.history.back();
-      else window.location.href = '/';
-      return;
-    }
-
-    fullscreenOnce();
-
-    // Panel takes every key while it is open — except the two shortcuts, which
-    // switch sheets instead of forcing a close first.
-    if (panelKind) {
-      if (k === 's' || k === 'S') { e.preventDefault(); openPanel('quality'); return; }
-      if (k === 'c' || k === 'C') { e.preventDefault(); openPanel('comments'); return; }
-      var rows = panelBody.querySelectorAll('button.row');
-      if (isUp(c, k) || isDown(c, k)) {
-        e.preventDefault();
-        if (rows.length) {
-          var idx = Array.prototype.indexOf.call(rows, document.activeElement);
-          var delta = isDown(c, k) ? 1 : -1;
-          if (idx < 0) idx = delta > 0 ? -1 : 0;
-          var nxt = rows[Math.max(0, Math.min(rows.length - 1, idx + delta))];
-          if (nxt) nxt.focus();
-        } else {
-          panelBody.scrollTop += isDown(c, k) ? 320 : -320;
-        }
-        return;
-      }
-      if (isOk(c, k)) {
-        e.preventDefault();
-        if (document.activeElement && document.activeElement.className.indexOf('row') >= 0) {
-          document.activeElement.click();
-        } else if (rows.length) {
-          rows[0].focus();
-        }
-        return;
-      }
-      return;
-    }
-
-    // Control bar visible: arrows move between buttons, Enter activates.
-    if (barOn) {
-      var bi = ctlBtns.indexOf(document.activeElement);
-      if (isLeft(c, k)) { e.preventDefault(); focusBtn(bi < 0 ? 0 : bi - 1); return; }
-      if (isRight(c, k)) { e.preventDefault(); focusBtn(bi < 0 ? 0 : bi + 1); return; }
-      if (isUp(c, k) || isDown(c, k)) { e.preventDefault(); setBar(false); return; }
-      if (isOk(c, k)) {
-        e.preventDefault();
-        if (bi >= 0) ctlBtns[bi].click();
-        else focusBtn(0);
-        return;
-      }
-    }
-
-    if (isUp(c, k) || isDown(c, k)) {
-      e.preventDefault();
-      chrome();
-      focusBtn(0);
-      return;
-    }
-    if (isLeft(c, k)) { e.preventDefault(); seek(-10); return; }
-    if (isRight(c, k)) { e.preventDefault(); seek(10); return; }
-
-    if (isOk(c, k) || k === ' ' || k === 'Spacebar' || c === 32) {
-      e.preventDefault();
-      toggle();
-      return;
-    }
-    if (c === 179 || c === 415 || c === 10252 || k === 'MediaPlayPause' || k === 'Play' || k === 'MediaPlay') {
-      toggle();
-      return;
-    }
-    if (c === 19 || c === 178 || k === 'MediaStop' || k === 'Pause') {
-      if (!v.paused) toggle();
-      return;
-    }
-    if (k === 's' || k === 'S') { e.preventDefault(); openPanel('quality'); return; }
-    if (k === 'c' || k === 'C') { e.preventDefault(); openPanel('comments'); return; }
-    if (k === 'f' || k === 'F') { fullscreen(); return; }
-
-    chrome();
-  });
-
-  document.addEventListener('click', function (e) {
-    if (e.target === v) return;
-    chrome();
-  });
-  document.addEventListener('mousemove', chrome);
-  window.addEventListener('load', function () { chrome(); });
-
-  syncPlayLabel();
-  load();
-})();
-`;
 const LOGIN_JS = `
 (function () {
   var codeEl = document.getElementById('code');
@@ -1267,6 +567,20 @@ async function handle(req, res) {
   }
 
   // hls.js, served locally so the TV doesn't need internet for the player.
+  if (path === '/player.js') {
+    try {
+      const js = fs.readFileSync(new URL('./public/player.js', import.meta.url));
+      res.writeHead(200, {
+        'content-type': 'application/javascript; charset=utf-8',
+        'cache-control': 'no-cache',
+        'content-length': js.length,
+      });
+      return res.end(js);
+    } catch (e) {
+      return json(res, 404, { error: 'player.js missing' });
+    }
+  }
+
   if (path === '/hls.js') {
     try {
       const js = fs.readFileSync(new URL('./public/hls.min.js', import.meta.url));
@@ -1301,9 +615,23 @@ async function handle(req, res) {
   if (media) {
     const entry = tokens.get(media[1]);
     if (!entry) return json(res, 410, { error: 'stream expired' });
-    const target = media[2] === 'audio' ? entry.audio : entry.video;
+    const kind = media[2];
+    const target = entry[kind];
     if (!target) return json(res, 404, { error: 'no stream' });
-    return proxyMedia(req, res, target);
+    return proxyMedia(req, res, target, undefined, async () => {
+      if (!entry.id) return null;
+      log('media refresh', entry.id, kind, entry.muxed ? 'muxed' : 'h' + entry.height);
+      const info = await resolveStream(entry.id, {
+        muxed: !!entry.muxed,
+        height: entry.height || 1080,
+        fresh: true,
+      });
+      if (!info || info.live || !info.video) return null;
+      entry.video = info.video;
+      entry.audio = info.audio;
+      entry.height = info.height;
+      return entry[kind];
+    });
   }
 
   // --- resolve a video ---------------------------------------------------
@@ -1311,9 +639,10 @@ async function handle(req, res) {
     const id = url.searchParams.get('id') || '';
     if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return json(res, 400, { error: 'bad video id' });
     const muxed = url.searchParams.get('muxed') === '1';
+    const fresh = url.searchParams.get('fresh') === '1';
     const h = Math.min(1080, Math.max(360, Number(url.searchParams.get('h')) || 1080));
     try {
-      const info = await resolveStream(id, { muxed, height: h });
+      const info = await resolveStream(id, { muxed, height: h, fresh });
       if (info.live) {
         log('play live', id, ua(req));
         return json(res, 200, {
@@ -1323,7 +652,13 @@ async function handle(req, res) {
           height: 0,
         });
       }
-      const tok = makeToken({ video: info.video, audio: info.audio });
+      const tok = makeToken({
+        video: info.video,
+        audio: info.audio,
+        id,
+        height: info.height,
+        muxed,
+      });
       log(
         'play ok',
         id,
@@ -1477,34 +812,7 @@ async function handle(req, res) {
   if (path === '/watch') {
     const id = url.searchParams.get('id') || '';
     if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return errorPage(res, new Error('Bad video id'), 400);
-    const body = `<div class="watch">
-      <video id="v" autoplay muted playsinline webkit-playsinline x5-playsinline preload="auto"></video>
-      <audio id="a" preload="auto" muted></audio>
-      <div class="ov hide" id="ov">
-        <button class="btn" id="back">← Back</button>
-        <h1 id="title">Loading…</h1>
-      </div>
-      <div class="ovb hide" id="ovb">
-        <div class="prog" id="prog"><div id="progfill"></div></div>
-        <div class="btns">
-          <button class="ctl" id="ctlplay">Pause</button>
-          <button class="ctl" id="ctlgear">Quality</button>
-          <button class="ctl" id="ctlcmt">Comments</button>
-        </div>
-      </div>
-      <button id="start" class="start">▶ Play</button>
-      <div class="hud hide" id="hud"></div>
-      <div class="clock" id="clock"></div>
-      <div class="panel hide" id="panel" tabindex="-1">
-        <div class="panel-head">
-          <span id="paneltitle">Quality</span>
-          <span class="panel-hint">Back to close</span>
-        </div>
-        <div class="panel-body" id="panelbody"></div>
-      </div>
-      <div class="err" id="err" style="display:none"></div>
-    </div>
-    <script>${PLAYER_JS}</script>`;
+    const body = `<div class="watch">${playerMarkup()}</div>`;
     return html(res, 200, page({ title: 'Watch', body, active: '', signedIn: yt.signedIn(), cinema: true }));
   }
 

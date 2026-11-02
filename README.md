@@ -31,18 +31,47 @@ with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
 | ↑ ↓ | move between tiles / rows | show the control bar; hide it again |
 | ← → | move between tiles and nav links | seek ∓10 s (bar hidden) / move between buttons |
 | OK / Enter | open the focused item | play/pause, or activate the focused button |
-| Back / Backspace / Esc | previous page | close the panel, then the bar, then back to the grid |
+| Back / Backspace / Esc | previous page | close the panel, then the bar, then the grid |
 | Play/Pause | — | play / pause |
 | S | — | quality menu (same as the **Quality** button) |
 | C | — | comments (same as the **Comments** button) |
+| D | — | open `/diag` (works from any page) |
 | F | — | toggle fullscreen |
 
-The player is cinema-style: video fills the screen and the title/control bars fade out
-after a few seconds; any key brings them back. The **Quality** sheet lists only the
-resolutions that video has and remembers your pick; **Automatic** goes back to the
-1080p-first cascade. The container is muted on load so autoplay is never blocked, then
-sound is switched on; on TVs that still refuse, one OK press starts the sound.
-Clicking/tapping the picture also play-pauses.
+## How playback starts
+
+Choosing a tile does **not** load a new page. Every page carries the player as a
+hidden overlay; the tile click opens it in place and the URL is updated with
+`history.pushState`. That matters for two reasons:
+
+- The OK press that chose the video is still a *live user gesture* when playback
+  begins, so the browser lets the player turn the sound on and go fullscreen. A
+  full page load throws that gesture away, which is why a separate watch page
+  always ended up muted. (This is the same reason Jellyfin/Plex feel instant.)
+- Nothing is re-fetched, so the grid, its scroll position and the focused tile
+  survive. Back closes the overlay and restores all three.
+
+`/watch?id=…` still works as a real page for bookmarks, reloads and deep links;
+it uses the same player script.
+
+The player is cinema-style: video fills the screen and the title/control bars fade
+out after a few seconds; any key brings them back. The **Quality** sheet lists only
+the resolutions that video has and remembers your pick; **Automatic** goes back to
+the 1080p-first cascade. The container starts muted so playback is never blocked,
+then sound is switched on in the same gesture window; if the browser still refuses,
+playback continues muted and one OK press turns the sound on. Clicking/tapping the
+picture also play-pauses.
+
+If something pauses the stream on its own (the browser's autoplay policy, a stalled
+fragment, a decoder reset) the player resumes it, the way a set-top box does. It
+only stays paused when you paused it.
+
+Resolved stream URLs are cached for a few hours, but googlevideo sometimes invalidates
+one early (IP or session change). The proxy notices the resulting 403 and re-resolves once
+before handing anything to the TV; the player does the same if a URL dies mid-playback,
+resuming at the same position. A failed **audio** track is also non-fatal: it is
+re-resolved once, then playback continues video-only at the chosen quality instead of
+dropping the resolution for no reason.
 
 If a TV cannot decode a stream it steps down automatically. The chosen tier is stored
 in the browser; open `/watch?id=…&h=1080` to forget it and try again at 1080p. Your own
@@ -195,7 +224,8 @@ TV), so budget ~2× the video bitrate. Gigabit ethernet is plenty.
 
 ## Diagnostics
 
-If a video won't play on the TV, open `http://<host>:8484/diag` **on the TV**. It
+If a video won't play on the TV, open `http://<host>:8484/diag` **on the TV** (or press
+**D** anywhere in the app). It
 reports the browser's user agent, `MediaSource`, codec support and fullscreen, then
 runs eight playback tests **one at a time** (TV chips often have a single video
 decoder, so parallel tests lie):
