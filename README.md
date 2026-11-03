@@ -18,8 +18,8 @@ with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
   the player turns sound on by itself where the browser allows it
 - Bottom control bar with play/pause, a **Quality** menu listing the resolutions this
   video actually offers, and **Comments** (read-only, scrolls for more)
-- Quality cascade 1080p → 720p → 480p → compatible file, and it remembers what your
-  TV could decode so later videos start there
+- Quality menu with every resolution this video offers; adaptive ABR by default,
+  and an explicit pick pins that level instantly
 - Livestreams, played as HLS through a built-in relay (no native HLS required)
 - Remote-friendly UI: big tiles, arrow-key spatial navigation
 - No ads, no tracking pixels, no YouTube player
@@ -59,17 +59,24 @@ out after a few seconds; any key brings them back. Up from the bottom row focuse
 timeline (Left/Right seek 10 s), Up again reaches **Back**, and Down walks back down.
 The **Quality** sheet lists only the resolutions that video has and remembers your
 pick; it opens instantly because `/api/play` already sends the list, so no second
-`yt-dlp` run is needed. **Automatic** goes back to the 720p-first cascade.
+`yt-dlp` run is needed. Picking a quality switches hls.js to that level immediately —
+no re-resolve and no restart. **Automatic** clears the pin and hands quality back to
+hls.js.
 Clicking/tapping the picture also play-pauses.
 
-VOD uses a single MSE pipeline: YouTube's H.264 **HLS video playlist** plus its
+VOD uses a single MSE pipeline: YouTube's H.264 **HLS video playlists** plus the
 matching **audio playlist** are fed to hls.js, which presents one `<video>` element.
-The old split progressive path (a video element *and* a separate audio element,
-often with a 100 MB+ open-ended download) is what wedged VIDAA's media stack, so it
-is now only a fallback for videos with no HLS pair. Livestreams use the same single
-element; the first `yt-dlp` probe now returns the `hls_variant` master directly, so a
-live channel starts from one resolve instead of two (and hls.js gets every level
-instead of one fixed variant).
+The server turns *every* H.264 rendition (360p–1080p) into one master playlist with a
+single audio group, so hls.js starts on the cheapest level — first picture appears
+quickly even on weak TV Wi-Fi — and ABR climbs or steps down as the link allows.
+Pinning one 1080p variant (the old behaviour) is what made playback stall every couple
+of seconds. The old split progressive path (a video element *and* a separate audio
+element, often with a 100 MB+ open-ended download) is what wedged VIDAA's media stack,
+so it is now only a fallback for videos with no HLS pair. Livestreams use the same
+single element; the first `yt-dlp` probe returns the `hls_variant` master directly, so
+a live channel starts from one resolve instead of two (and hls.js gets every level
+instead of one fixed variant). Live playback starts at 720p and releases to ABR after
+four seconds.
 
 Tiles are prefetched 300 ms after the remote stops on them, and the prefetch shares
 the same in-flight `yt-dlp` run as the play request. That removes most of the 10 s+
@@ -98,8 +105,8 @@ dropping the resolution for no reason.
 If a TV cannot decode a stream it steps down automatically. The chosen tier is stored
 in the browser; open `/watch?id=…&h=1080` to forget it and try again at 1080p. Your own
 quality pick from the menu is remembered separately (`tubetv.h`); **Automatic** clears it.
-Build `2026-11-02.3` also clears the old forced-split quality/tier once (marker
-`tubetv.prefver`), so a TV that previously wedged starts on the HLS path.
+Build `2026-11-02.5` also clears the old forced-split quality/tier once (marker
+`tubetv.prefver=3`), so a TV that previously wedged starts adaptive once.
 
 ## Requirements
 
@@ -231,8 +238,27 @@ copies bytes — so CPU stays flat:
 |---|---|---|
 | Idle | ~0% | <1% of one core |
 | Proxying 1080p | 2.6% of one core @ 3.3 Mbps | ~4–6% (up to ~12% for 8 Mbps) |
-| Resolving a new video | 0.83 CPU-s, 1.9 s, 98 MB peak | ~2 CPU-s, 3–5 s, cached 3 h |
+| Resolving a new video | 0.8–1 CPU-s, 2–3 s, 98 MB peak | see below |
 | RAM | 100–135 MB | same |
+
+Resolution is the one slow step: `yt-dlp` has to run YouTube's player JavaScript
+before it can list formats. Modern yt-dlp does that in a JS runtime instead of a
+deprecated pure-Python path — 1.9 s versus 10–28 s per cold resolve on the Pi. The
+server passes `--js-runtimes node`, and the Docker image already ships Node 22, so the
+fast path is used automatically (if `node` is missing yt-dlp warns and falls back).
+`./run.sh` on a Mac uses whatever `node` is on `PATH`.
+
+To see where the seconds go on the host, open `http://<host>:8484/diag/sys`. It reports
+Node/platform/CPU/memory, DNS lookup time for IPv4 and IPv6, an HTTPS probe, and the
+yt-dlp binary in use. Add `?resolve=<videoId>` to include one fresh cold resolve:
+
+```
+http://<host>:8484/diag/sys?resolve=aqz-KE-bpKQ
+```
+
+A slow `dns6` with a fast `dns4` is a broken IPv6 route (yt-dlp runs with
+`--force-ipv4` for exactly that reason); a slow `resolve` with fast `dns4`/`http`
+means yt-dlp itself is the bottleneck, not the network.
 
 The real limit is bandwidth: traffic passes through the box twice (Google → host →
 TV), so budget ~2× the video bitrate. Gigabit ethernet is plenty.
@@ -256,7 +282,8 @@ TV), so budget ~2× the video bitrate. Gigabit ethernet is plenty.
 - Only 1080p H.264. VIDAA's browser usually can't do VP9/AV1 or 4K.
 - 1080p is H.264 *High* profile; many TV decoders only do *Main*. That is why the
   player steps down to 720p, which YouTube serves as Main profile (`avc1.4D401F`).
-- Audio and video are separate DASH streams synced in the page; if they drift, pause/play once.
+- Audio and video are separate HLS streams muxed by hls.js into one `<video>`; the
+  split element pair is only a fallback for videos with no HLS rendition.
 - Livestreams need `MediaSource` in the TV browser (hls.js). Old VIDAA builds without it
   cannot play them — `/diag` tells you which case you have.
 
@@ -288,6 +315,9 @@ watchdog detects exactly this and steps down to the next quality tier.
 
 `http://<host>:8484/logs` shows the last 250 server log lines — every `/api/play`
 and `/api/media` request, with the TV's user agent, HTTP status, range and size.
+Every `yt-dlp` run is logged with its duration (`ytdlp <id> 2700ms ok …`), so a slow
+start is easy to tell from a stall. `http://<host>:8484/diag/sys` measures the host
+side (DNS4/DNS6, HTTPS, binary, and optionally one cold resolve).
 
 The player also logs quality tiers, autoplay blocks, decode errors, stalls and HLS
 errors, so the first failure is visible in `/logs` without reproducing it.

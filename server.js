@@ -2,6 +2,7 @@ import http from 'node:http';
 import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import dns from 'node:dns/promises';
 import { Readable } from 'node:stream';
 
 import * as auth from './lib/auth.js';
@@ -12,13 +13,14 @@ import {
   qualities as resolveQualities,
   binary as ytdlpBinary,
   version as ytdlpVersion,
+  setLogger as setYtdlpLogger,
 } from './lib/ytdlp.js';
 import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-02.4';
+const BUILD = '2026-11-02.5';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -45,6 +47,7 @@ function log(...parts) {
   if (LOG.length > 400) LOG.shift();
   console.log(line);
 }
+setYtdlpLogger(log);
 
 function ua(req) {
   return String(req.headers['user-agent'] || '?').slice(0, 90);
@@ -576,6 +579,54 @@ async function handle(req, res) {
     return html(res, 200, page({ title: 'Diagnostics', body, signedIn: yt.signedIn() }));
   }
 
+  // Server-side timing: where the seconds actually go. Open on the Pi itself
+  // (or curl from the LAN) to tell DNS/IPv6 trouble from yt-dlp cost.
+  //   /diag/sys
+  //   /diag/sys?resolve=<videoId>   (also does one fresh yt-dlp resolve)
+  if (path === '/diag/sys') {
+    const timed = async (fn) => {
+      const t = Date.now();
+      try {
+        const value = await fn();
+        return { ms: Date.now() - t, ok: true, value };
+      } catch (e) {
+        return { ms: Date.now() - t, ok: false, error: String(e.message || e).slice(0, 160) };
+      }
+    };
+    const out = {
+      build: BUILD,
+      node: process.version,
+      platform: `${process.platform}/${process.arch}`,
+      cpus: os.cpus().length,
+      load: os.loadavg().map((n) => Math.round(n * 100) / 100),
+      memFreeMB: Math.round(os.freemem() / 1048576),
+      ytdlp: ytdlpBinary(),
+      dns4: await timed(() => dns.lookup('www.youtube.com', { family: 4 })),
+      dns6: await timed(() => dns.lookup('www.youtube.com', { family: 6 })),
+      http: await timed(async () => {
+        const r = await fetch('https://www.youtube.com/generate_204', { redirect: 'manual' });
+        return r.status;
+      }),
+    };
+    const rid = url.searchParams.get('resolve') || '';
+    if (/^[A-Za-z0-9_-]{11}$/.test(rid)) {
+      const t = Date.now();
+      try {
+        const info = await resolveHlsStream(rid, { height: 720, fresh: true });
+        out.resolve = {
+          ms: Date.now() - t,
+          live: !!info.live,
+          heights: info.heights || [],
+          levels: info.variants ? info.variants.length : 0,
+          title: (info.title || '').slice(0, 60),
+        };
+      } catch (e) {
+        out.resolve = { ms: Date.now() - t, error: String(e.message || e).slice(0, 160) };
+      }
+    }
+    return json(res, 200, out);
+  }
+
   // Test-only proxy so /diag can check whether the proxy path itself works.
   if (path === '/api/probe') {
     const u = url.searchParams.get('u') || '';
@@ -656,25 +707,39 @@ async function handle(req, res) {
     }
   }
 
-  // Master playlist for VOD MSE playback: one video variant + one audio group,
-  // so hls.js can feed a single <video> element.
+  // Master playlist for VOD MSE playback: every H.264 HLS rendition plus one
+  // audio group, so hls.js has one <video> element *and* real ABR. Starting on
+  // the lowest level is what makes the first frame appear quickly on a TV whose
+  // Wi-Fi cannot sustain 1080p; hls.js steps up when the link allows.
   if (path === '/api/hls/master') {
     const entry = hlsTokens.get(url.searchParams.get('tok') || '');
     if (!entry) return json(res, 410, { error: 'stream expired' });
     const wrap = (u) => `/api/hls?u=${b64u(u)}`;
-    const bw = Math.max(300000, Math.round((entry.tbr || 2000) * 1000));
-    const resTag = entry.width && entry.height
-      ? `RESOLUTION=${entry.width}x${entry.height},`
-      : '';
-    const codecs = [entry.vcodec, entry.acodec].filter(Boolean).join(',');
-    const body = [
+    const list = entry.variants && entry.variants.length
+      ? entry.variants
+      : [{
+          height: entry.height,
+          width: entry.width,
+          vcodec: entry.vcodec,
+          tbr: entry.tbr,
+          playlist: entry.videoPlaylist,
+        }];
+    const lines = [
       '#EXTM3U',
       '#EXT-X-VERSION:3',
       `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Default",DEFAULT=YES,AUTOSELECT=YES,URI="${wrap(entry.audioPlaylist)}"`,
-      `#EXT-X-STREAM-INF:BANDWIDTH=${bw},${resTag}CODECS="${codecs}",AUDIO="aud"`,
-      wrap(entry.videoPlaylist),
-      '',
-    ].join('\n');
+    ];
+    for (const v of list) {
+      const bw = Math.max(300000, Math.round((v.tbr || 2000) * 1000));
+      const resTag = v.width && v.height ? `RESOLUTION=${v.width}x${v.height},` : '';
+      const codecs = [v.vcodec || entry.vcodec, entry.acodec].filter(Boolean).join(',');
+      lines.push(
+        `#EXT-X-STREAM-INF:BANDWIDTH=${bw},${resTag}CODECS="${codecs}",AUDIO="aud"`
+      );
+      lines.push(wrap(v.playlist));
+    }
+    lines.push('');
+    const body = lines.join('\n');
     res.writeHead(200, {
       'content-type': 'application/vnd.apple.mpegurl',
       'cache-control': 'no-store',
@@ -753,7 +818,15 @@ async function handle(req, res) {
         }
         if (prefetch) return json(res, 200, { ok: true, mode: 'mse', height: info.height });
         const tok = makeHlsToken(info);
-        log('play hls', id, `${info.height}p`, info.vcodec, info.acodec, ua(req));
+        log(
+          'play hls',
+          id,
+          `${info.height}p`,
+          `${info.variants ? info.variants.length : 1}lv`,
+          info.vcodec,
+          info.acodec,
+          ua(req)
+        );
         return json(res, 200, {
           title: info.title,
           duration: info.duration,

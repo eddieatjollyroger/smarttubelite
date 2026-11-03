@@ -48,6 +48,7 @@
   var hlsOff = false;
   var hlsFatalRetries = 0;
   var hlsFatalBusy = false;
+  var liveRetries = 0;
   var watchdog = null;
   var id = '';
   var active = false;
@@ -66,6 +67,9 @@
   var prefetchId = '';
   var prefetchBusy = false;
   var prefetchQueued = '';
+  var pinnedH = 0;
+  var loadTimer = null;
+  var loadStartedAt = 0;
 
   var CINEMA_PAGE = document.body.classList.contains('cinema');
 
@@ -95,6 +99,25 @@
     }
     out.push({ muxed: 1 });
     return out;
+  }
+
+  // Closest HLS level at or below h; the lowest level if h is smaller than
+  // everything on offer. -1 when hls.js is not driving the element.
+  function levelIndexFor(h) {
+    if (!hls || !hls.levels || !hls.levels.length) return -1;
+    var best = -1;
+    var bestH = -1;
+    for (var i = 0; i < hls.levels.length; i++) {
+      var lh = hls.levels[i].height || 0;
+      if (lh > 0 && lh <= h && lh > bestH) { bestH = lh; best = i; }
+    }
+    if (best < 0) {
+      for (var j = 0; j < hls.levels.length; j++) {
+        var jh = hls.levels[j].height || 0;
+        if (best < 0 || jh < (hls.levels[best].height || 0)) best = j;
+      }
+    }
+    return best;
   }
 
   // Warm the server's yt-dlp cache while the viewer browses the grid. The real
@@ -145,6 +168,7 @@
   }
 
   function showErr(msg) {
+    stopElapsed();
     err.textContent = msg;
     err.style.display = 'block';
     report('error', { msg: msg, tier: tier, rs: v.readyState, ns: v.networkState,
@@ -160,6 +184,23 @@
     if (ms === true) return;
     var d = typeof ms === 'number' ? ms : 5000;
     hudTimer = setTimeout(function () { hud.className = 'hud hide'; }, d);
+  }
+
+  // A cold yt-dlp resolve used to take 20 s with no feedback, which looks like
+  // a frozen TV. Count the seconds in the HUD so the wait is obviously alive.
+  function startElapsed() {
+    stopElapsed();
+    loadStartedAt = Date.now();
+    hint('Starting… 0s', true);
+    loadTimer = setInterval(function () {
+      if (!active || started) { stopElapsed(); return; }
+      var s = Math.max(1, Math.round((Date.now() - loadStartedAt) / 1000));
+      hint('Starting… ' + s + 's', true);
+    }, 1000);
+  }
+
+  function stopElapsed() {
+    if (loadTimer) { clearInterval(loadTimer); loadTimer = null; }
   }
 
   function fmt(s) {
@@ -322,6 +363,8 @@
   }
 
   function attach(info) {
+    stopElapsed();
+    hint('Starting…', 8000);
     started = true;
     abortRetries = 0;
     audioGaveUp = false;
@@ -352,8 +395,10 @@
   }
 
   function attachHls(info, live) {
+    stopElapsed();
     started = true;
     isLive = !!live;
+    liveRetries = 0;
     // Resolutions came with /api/play, so the cogwheel can paint instantly
     // instead of waiting on another yt-dlp run.
     curHeights = (!live && info.heights && info.heights.length) ? info.heights : null;
@@ -396,15 +441,28 @@
           maxBufferLength: 20,
           maxMaxBufferLength: 30,
           backBufferLength: 30,
-          maxBufferSize: 40 * 1000 * 1000
+          maxBufferSize: 40 * 1000 * 1000,
+          // Fetch the first fragment while the manifest is still settling;
+          // saves a round trip on a cold start.
+          startFragPrefetch: true
         };
-        if (live) cfg.liveSyncDurationCount = 3;
+        // Our VOD master lists the renditions low→high, so level 0 is the
+        // cheapest way to get a picture on screen. ABR climbs from there.
+        if (!live) cfg.startLevel = 0;
+        // Four fragments of slack keeps a live stream alive through a Wi-Fi
+        // hiccup; three was tight enough to stall on the TV.
+        if (live) cfg.liveSyncDurationCount = 4;
         hls = new window.Hls(cfg);
         hls.on(window.Hls.Events.ERROR, function (ev, data) {
           report('hls-error', { type: data.type, details: data.details, fatal: !!data.fatal });
           if (!data.fatal) {
-            // A single bad fragment is normal; hls.js retries on its own.
-            if (data.type === 'mediaError') {
+            // bufferStalledError just means "waiting for the next fragment" and
+            // hls.js fixes it itself. Calling recoverMediaError() here (as .4
+            // did for every media error) tears the SourceBuffer down mid-play —
+            // that is what made playback stop every few seconds.
+            if (data.details === 'bufferStalledError') return;
+            if (data.type === 'mediaError' &&
+                /buffer(Append|AddCodec|Incompatible)/i.test(String(data.details || ''))) {
               try { hls.recoverMediaError(); } catch (e) {}
             }
             return;
@@ -412,8 +470,18 @@
           if (hlsFatalBusy) return;
 
           if (isLive) {
-            if (data.type === 'networkError') { try { hls.startLoad(); } catch (e) {} return; }
-            if (data.type === 'mediaError') { try { hls.recoverMediaError(); } catch (e) {} return; }
+            if (liveRetries < 4 && (data.type === 'networkError' || data.type === 'mediaError')) {
+              liveRetries++;
+              report('live-retry', { details: data.details, n: liveRetries });
+              setTimeout(function () {
+                try {
+                  if (data.type === 'mediaError') hls.recoverMediaError();
+                  else hls.startLoad();
+                } catch (e) {}
+                retryMuted();
+              }, 400);
+              return;
+            }
             showErr('Live stream failed: ' + data.details);
             return;
           }
@@ -443,23 +511,34 @@
           }, 0);
         });
         hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
+          liveRetries = 0;
           if (live) {
-            // Start on the best level that isn't 4K, then hand control back to
-            // the adaptive switcher so a slow link can still step down.
-            var best = 0, bestH = 0;
-            for (var i = 0; i < hls.levels.length; i++) {
-              var lh = hls.levels[i].height || 0;
-              if (lh <= 1080 && lh >= bestH) { bestH = lh; best = i; }
-            }
-            if (bestH > 0) {
-              try { hls.startLevel = best; } catch (e) {}
-              try { hls.currentLevel = best; } catch (e) {}
+            // Start at 720p for a few seconds, then hand control to ABR. The
+            // old code pinned the best level (often 1080p) and only released
+            // it after 10 s; a TV whose Wi-Fi cannot sustain that stalls before
+            // the release. 720p is a safe first fragment on any TV, and ABR can
+            // still climb afterwards.
+            var start = levelIndexFor(720);
+            if (start >= 0) {
+              try { hls.startLevel = start; } catch (e) {}
+              try { hls.currentLevel = start; } catch (e) {}
               setTimeout(function () {
-                try { hls.currentLevel = -1; } catch (e) {}
-              }, 10000);
+                if (!pinnedH) {
+                  try { hls.currentLevel = -1; } catch (e) {}
+                }
+              }, 4000);
             }
-          } else if (resumeAt > 1) {
-            try { v.currentTime = resumeAt; } catch (e) {}
+          } else {
+            // cfg.startLevel already picked the cheapest rendition. Only an
+            // explicit viewer choice pins a level; otherwise ABR is free to
+            // climb as far as the link and decoder allow.
+            if (pinnedH) {
+              var idx = levelIndexFor(pinnedH);
+              if (idx >= 0) { try { hls.currentLevel = idx; } catch (e) {} }
+            }
+            if (resumeAt > 1) {
+              try { v.currentTime = resumeAt; } catch (e) {}
+            }
           }
           startWatchdog();
           tryPlay();
@@ -491,6 +570,7 @@
       (forceFresh ? '&fresh=1' : '');
     forceFresh = false;
     report('request', { tier: tier, q: q });
+    startElapsed();
     var seq = loadSeq;
     fetch(q)
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
@@ -516,6 +596,7 @@
 
   function teardown() {
     stopWatchdog();
+    stopElapsed();
     if (hls) {
       try { hls.destroy(); } catch (e) {}
       hls = null;
@@ -540,10 +621,24 @@
 
   function setQuality(h) {
     try { localStorage.setItem('tubetv.h', String(h)); } catch (e) {}
-    resumeAt = v.currentTime || 0;
-    lastTime = resumeAt;
+    pinnedH = h;
     tiers = makeTiers(h);
     tier = 0;
+    // The master playlist already carries every rendition, so switching is
+    // instant: no second resolve, no re-buffer, no restart.
+    if (hls && !isLive) {
+      var idx = levelIndexFor(h);
+      if (idx >= 0) {
+        try { hls.currentLevel = idx; } catch (e) {}
+        closePanel();
+        hint('Quality: ' + (hls.levels[idx].height || h) + 'p', 4000);
+        report('quality', { h: h, level: idx });
+        chrome();
+        return;
+      }
+    }
+    resumeAt = v.currentTime || 0;
+    lastTime = resumeAt;
     hlsOff = false;
     hlsFatalRetries = 0;
     closePanel();
@@ -602,13 +697,18 @@
   }
 
   function paintQuality(hs) {
+    var curH = pinnedH;
+    if (!curH && hls && hls.currentLevel >= 0) {
+      curH = (hls.levels[hls.currentLevel] || {}).height || 0;
+    }
+    if (!curH) curH = tiers[tier].h;
     var html = '';
     for (var i = 0; i < hs.length; i++) {
       html += '<button class="row" data-h="' + hs[i] + '"><span>' + hs[i] + 'p</span>' +
-        (hs[i] === tiers[tier].h ? '<span class="chk">current</span>' : '') + '</button>';
+        (hs[i] === curH ? '<span class="chk">current</span>' : '') + '</button>';
     }
     if (!html) html = '<div class="pnote">No selectable formats for this video.</div>';
-    html += '<button class="row" id="qauto"><span>Automatic</span><span class="chk">720p, step down</span></button>';
+    html += '<button class="row" id="qauto"><span>Automatic</span><span class="chk">adaptive</span></button>';
     panelBody.innerHTML = html;
 
     var rows = panelBody.querySelectorAll('button[data-h]');
@@ -621,8 +721,16 @@
     if (auto) {
       auto.addEventListener('click', function () {
         try { localStorage.removeItem('tubetv.h'); } catch (e) {}
+        pinnedH = 0;
         tiers = makeTiers(720);
         tier = 0;
+        if (hls && !isLive) {
+          try { hls.currentLevel = -1; } catch (e) {}
+          closePanel();
+          hint('Quality: automatic', 4000);
+          chrome();
+          return;
+        }
         hlsOff = false;
         hlsFatalRetries = 0;
         closePanel();
@@ -796,6 +904,9 @@
     if (isLive) return false;
     if (tier >= tiers.length - 1) return false;
     tier++;
+    // A frozen MSE pipeline is not going to improve by re-resolving the same
+    // HLS master; drop to the split/progressive path at the next tier.
+    if (why === 'frozen' && hls) hlsOff = true;
     // A frozen stream is the strongest signal that this TV's decoder (or its
     // video-only pipeline) cannot handle the format, so remember the tier.
     if (why === 'frozen' || why === 'stalled' || /^(video|audio)-[34]$/.test(why)) {
@@ -823,7 +934,7 @@
     var warned = false;
 
     watchdog = setInterval(function () {
-      if (!started || isLive || !active) return;
+      if (!started || !active) return;
       if (document.hidden) { lastMove = Date.now(); return; }
       if (panelKind) { lastMove = Date.now(); return; }
       if (userPaused) { lastMove = Date.now(); return; }
@@ -846,6 +957,19 @@
         lastT = t;
         lastMove = now;
         warned = false;
+        return;
+      }
+
+      // Live has no quality cascade to step down to. If the clock has not
+      // moved for 12 s, ask hls.js to reload the live playlist and retry.
+      if (isLive) {
+        if (now - lastMove > 12000) {
+          lastMove = now;
+          report('live-stall', { rs: v.readyState, ns: v.networkState, t: t });
+          hint('Reconnecting live…', 5000);
+          try { hls.startLoad(); } catch (e) {}
+          retryMuted();
+        }
         return;
       }
 
@@ -963,6 +1087,7 @@
 
   // --- open / close on grid pages ---------------------------------------
   function resetChrome() {
+    stopElapsed();
     if (hudTimer) clearTimeout(hudTimer);
     if (barTimer) clearTimeout(barTimer);
     err.style.display = 'none';
@@ -1007,20 +1132,21 @@
     lastAnchor = anchor || lastAnchor;
     lastScroll = window.pageYOffset || 0;
     prefetchId = id2;
-    // One-time migration: older builds saved a forced split quality (often
-    // 720p) and a tier position that would bypass the new single-pipeline HLS
-    // path. Clear it so the TV starts on the safer MSE path once.
+    // One-time migration for the adaptive-level build. Older builds saved a
+    // forced split quality and a cascade position; both would bypass the new
+    // multi-level HLS master. Clear them so the TV starts adaptive once.
     try {
-      if (localStorage.getItem('tubetv.prefver') !== '2') {
+      if (localStorage.getItem('tubetv.prefver') !== '3') {
         localStorage.removeItem('tubetv.h');
         localStorage.removeItem('tubetv.tier');
-        localStorage.setItem('tubetv.prefver', '2');
+        localStorage.setItem('tubetv.prefver', '3');
       }
     } catch (e) {}
-    // ?h=/manual pick wins, then the cascade position this TV settled on.
+    // An explicit pick pins one level; otherwise ABR is in charge.
     try {
       var savedH = parseInt(localStorage.getItem('tubetv.h') || '', 10);
       var saved = parseInt(localStorage.getItem('tubetv.tier') || '', 10);
+      pinnedH = savedH || 0;
       tiers = makeTiers(savedH || 720);
       if (!savedH && saved > 0 && saved < tiers.length) tier = saved;
     } catch (e) {}
@@ -1034,6 +1160,7 @@
 
   function close() {
     if (!active) return;
+    stopElapsed();
     loadSeq++;
     teardown();
     active = false;
@@ -1278,6 +1405,7 @@
         if (qh) {
           localStorage.removeItem('tubetv.tier');
           tiers = makeTiers(qh);
+          pinnedH = qh;
         }
       } catch (e) {}
       resetChrome();
