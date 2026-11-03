@@ -71,6 +71,17 @@
   var loadTimer = null;
   var loadStartedAt = 0;
 
+  // YouTube only offers 1440p/2160p as VP9. Ask the browser once; if it can't
+  // decode VP9 in MSE, /api/play never mentions those levels and the 4K quality
+  // entries simply do not exist for this TV.
+  var supportsVp9 = false;
+  try {
+    supportsVp9 = !!(window.MediaSource && (
+      MediaSource.isTypeSupported('video/mp4; codecs="vp09.00.51.08"') ||
+      MediaSource.isTypeSupported('video/mp4; codecs="vp09.00.50.08"')
+    ));
+  } catch (e) {}
+
   var CINEMA_PAGE = document.body.classList.contains('cinema');
 
   // The tile OK press is a real user gesture. If it is still active when the
@@ -116,6 +127,20 @@
         var jh = hls.levels[j].height || 0;
         if (best < 0 || jh < (hls.levels[best].height || 0)) best = j;
       }
+    }
+    return best;
+  }
+
+  // Highest level ABR is allowed to climb to on its own. 1080p is the safe
+  // ceiling: 1440p/4K are opt-in only, because they double or quadruple the
+  // bitrate and an old TV decoder may not sustain them.
+  function autoCapIndex() {
+    if (!hls || !hls.levels) return -1;
+    var best = -1;
+    var bestH = 0;
+    for (var i = 0; i < hls.levels.length; i++) {
+      var lh = hls.levels[i].height || 0;
+      if (lh > 0 && lh <= 1080 && lh >= bestH) { bestH = lh; best = i; }
     }
     return best;
   }
@@ -434,7 +459,10 @@
         var cfg = {
           enableWorker: false,
           lowLatencyMode: false,
-          capLevelToPlayerSize: true,
+          // 4K is opt-in. capping by element size would hide the 2160p level
+          // from a TV whose browser reports a 1080p CSS viewport; autoCapIndex()
+          // below is the real ceiling for automatic playback.
+          capLevelToPlayerSize: false,
           abrEwmaDefaultEstimate: 2000000,
           // TV browsers have little spare memory. Keep the MSE buffer small;
           // hls.js evicts old fragments as playback advances.
@@ -512,6 +540,9 @@
         });
         hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
           liveRetries = 0;
+          // Automatic playback never climbs past 1080p; picking 1440p/2160p in
+          // the quality sheet lifts this cap explicitly.
+          var cap = autoCapIndex();
           if (live) {
             // Start at 720p for a few seconds, then hand control to ABR. The
             // old code pinned the best level (often 1080p) and only released
@@ -519,22 +550,28 @@
             // the release. 720p is a safe first fragment on any TV, and ABR can
             // still climb afterwards.
             var start = levelIndexFor(720);
+            try { hls.autoLevelCapping = cap; } catch (e) {}
             if (start >= 0) {
               try { hls.startLevel = start; } catch (e) {}
               try { hls.currentLevel = start; } catch (e) {}
               setTimeout(function () {
                 if (!pinnedH) {
                   try { hls.currentLevel = -1; } catch (e) {}
+                  try { hls.autoLevelCapping = cap; } catch (e) {}
                 }
               }, 4000);
             }
           } else {
             // cfg.startLevel already picked the cheapest rendition. Only an
             // explicit viewer choice pins a level; otherwise ABR is free to
-            // climb as far as the link and decoder allow.
+            // climb as far as the link and decoder allow (up to 1080p).
+            try { hls.autoLevelCapping = cap; } catch (e) {}
             if (pinnedH) {
               var idx = levelIndexFor(pinnedH);
-              if (idx >= 0) { try { hls.currentLevel = idx; } catch (e) {} }
+              if (idx >= 0) {
+                if (pinnedH > 1080) { try { hls.autoLevelCapping = -1; } catch (e) {} }
+                try { hls.currentLevel = idx; } catch (e) {}
+              }
             }
             if (resumeAt > 1) {
               try { v.currentTime = resumeAt; } catch (e) {}
@@ -567,6 +604,7 @@
     var q = '/api/play?id=' + encodeURIComponent(id) +
       (t.muxed ? '&muxed=1' : '&h=' + (t.h || 720)) +
       (useHls ? '&hls=1' : '') +
+      (useHls && supportsVp9 ? '&vp9=1' : '') +
       (forceFresh ? '&fresh=1' : '');
     forceFresh = false;
     report('request', { tier: tier, q: q });
@@ -629,7 +667,10 @@
     if (hls && !isLive) {
       var idx = levelIndexFor(h);
       if (idx >= 0) {
-        try { hls.currentLevel = idx; } catch (e) {}
+        try {
+          hls.autoLevelCapping = h > 1080 ? -1 : autoCapIndex();
+          hls.currentLevel = idx;
+        } catch (e) {}
         closePanel();
         hint('Quality: ' + (hls.levels[idx].height || h) + 'p', 4000);
         report('quality', { h: h, level: idx });
@@ -704,7 +745,8 @@
     if (!curH) curH = tiers[tier].h;
     var html = '';
     for (var i = 0; i < hs.length; i++) {
-      html += '<button class="row" data-h="' + hs[i] + '"><span>' + hs[i] + 'p</span>' +
+      var label = hs[i] + 'p' + (hs[i] >= 2160 ? ' (4K)' : '');
+      html += '<button class="row" data-h="' + hs[i] + '"><span>' + label + '</span>' +
         (hs[i] === curH ? '<span class="chk">current</span>' : '') + '</button>';
     }
     if (!html) html = '<div class="pnote">No selectable formats for this video.</div>';
@@ -725,7 +767,10 @@
         tiers = makeTiers(720);
         tier = 0;
         if (hls && !isLive) {
-          try { hls.currentLevel = -1; } catch (e) {}
+          try {
+            hls.autoLevelCapping = autoCapIndex();
+            hls.currentLevel = -1;
+          } catch (e) {}
           closePanel();
           hint('Quality: automatic', 4000);
           chrome();
@@ -984,6 +1029,25 @@
       }
 
       if (idle < limit) return;
+      // An explicit 4K pick that cannot keep up should fall back to adaptive
+      // 1080p, not abandon the whole HLS pipeline for the split path.
+      if (hls && !isLive && hls.currentLevel >= 0) {
+        var lh = (hls.levels[hls.currentLevel] || {}).height || 0;
+        if (lh > 1080) {
+          report('uhd-drop', { from: lh, rs: v.readyState });
+          pinnedH = 0;
+          try { localStorage.removeItem('tubetv.h'); } catch (e) {}
+          try {
+            hls.autoLevelCapping = autoCapIndex();
+            hls.currentLevel = -1;
+          } catch (e) {}
+          hint('4K stalled — adaptive up to 1080p', 6000);
+          lastT = -1;
+          lastMove = Date.now();
+          warned = false;
+          return;
+        }
+      }
       if (stepDown(v.readyState >= 3 ? 'frozen' : 'stalled')) {
         lastT = -1;
         lastMove = Date.now();
@@ -1154,7 +1218,8 @@
     document.body.classList.add('cinema');
     document.body.classList.add('watch-open');
     document.documentElement.style.overflow = 'hidden';
-    report('open', { id: id, mode: stage ? 'overlay' : 'page', tier: tier });
+    report('open', { id: id, mode: stage ? 'overlay' : 'page', tier: tier,
+      vp9: supportsVp9, mse: !!window.MediaSource });
     load();
   }
 

@@ -13,6 +13,7 @@ import {
   qualities as resolveQualities,
   binary as ytdlpBinary,
   version as ytdlpVersion,
+  queueStats as ytdlpQueue,
   setLogger as setYtdlpLogger,
 } from './lib/ytdlp.js';
 import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
@@ -20,7 +21,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-02.5';
+const BUILD = '2026-11-02.6';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -601,6 +602,7 @@ async function handle(req, res) {
       load: os.loadavg().map((n) => Math.round(n * 100) / 100),
       memFreeMB: Math.round(os.freemem() / 1048576),
       ytdlp: ytdlpBinary(),
+      resolveQueue: ytdlpQueue(),
       dns4: await timed(() => dns.lookup('www.youtube.com', { family: 4 })),
       dns6: await timed(() => dns.lookup('www.youtube.com', { family: 6 })),
       http: await timed(async () => {
@@ -715,15 +717,17 @@ async function handle(req, res) {
     const entry = hlsTokens.get(url.searchParams.get('tok') || '');
     if (!entry) return json(res, 410, { error: 'stream expired' });
     const wrap = (u) => `/api/hls?u=${b64u(u)}`;
-    const list = entry.variants && entry.variants.length
+    const all = entry.variants && entry.variants.length
       ? entry.variants
       : [{
           height: entry.height,
           width: entry.width,
+          codec: 'avc',
           vcodec: entry.vcodec,
           tbr: entry.tbr,
           playlist: entry.videoPlaylist,
         }];
+    const list = all.filter((v) => entry.allowVp9 || v.codec !== 'vp9');
     const lines = [
       '#EXTM3U',
       '#EXT-X-VERSION:3',
@@ -795,6 +799,9 @@ async function handle(req, res) {
     const fresh = url.searchParams.get('fresh') === '1';
     const useHls = url.searchParams.get('hls') === '1';
     const prefetch = url.searchParams.get('prefetch') === '1';
+    // The player probes MediaSource for VP9 and only asks for the 1440p/2160p
+    // levels when the TV can decode them. H.264 still carries everything ≤1080.
+    const vp9 = url.searchParams.get('vp9') === '1';
     const h = Math.min(1080, Math.max(360, Number(url.searchParams.get('h')) || 1080));
 
     // Preferred path for TV browsers: one <video> element via MSE, with hls.js
@@ -802,7 +809,7 @@ async function handle(req, res) {
     // and no giant open-ended progressive download.
     if (useHls) {
       try {
-        const info = await resolveHlsStream(id, { height: h, fresh });
+        const info = await resolveHlsStream(id, { height: h, fresh, prefetch });
         if (info.live) {
           // The HLS probe already identified the stream as live and handed
           // back the hls_variant master. Returning it here skips the second
@@ -817,12 +824,13 @@ async function handle(req, res) {
           });
         }
         if (prefetch) return json(res, 200, { ok: true, mode: 'mse', height: info.height });
-        const tok = makeHlsToken(info);
+        const tok = makeHlsToken({ ...info, allowVp9: vp9 });
+        const levels = (info.variants || []).filter((v) => vp9 || v.codec !== 'vp9');
         log(
           'play hls',
           id,
           `${info.height}p`,
-          `${info.variants ? info.variants.length : 1}lv`,
+          `${levels.length || 1}lv${vp9 ? '+vp9' : ''}`,
           info.vcodec,
           info.acodec,
           ua(req)
@@ -835,16 +843,21 @@ async function handle(req, res) {
           width: info.width,
           vcodec: info.vcodec,
           acodec: info.acodec,
-          heights: info.heights || [],
+          heights: (info.heights || []).filter((hh) => vp9 || hh <= 1080),
           mode: 'mse',
         });
       } catch (e) {
+        // A playback request cancelled this prefetch on purpose. Do not log it
+        // as an error and do not fall through to a second (split) resolve.
+        if (e.code === 'CANCELLED') {
+          return json(res, 200, { ok: true, cancelled: true, mode: 'mse' });
+        }
         log('hls ERR', id, String(e.message).slice(0, 100), ua(req));
       }
     }
 
     try {
-      const info = await resolveStream(id, { muxed, height: h, fresh });
+      const info = await resolveStream(id, { muxed, height: h, fresh, prefetch });
       if (info.live) {
         log('play live', id, ua(req));
         return json(res, 200, {
@@ -883,6 +896,9 @@ async function handle(req, res) {
         mode: 'split',
       });
     } catch (e) {
+      if (e.code === 'CANCELLED') {
+        return json(res, 200, { ok: true, cancelled: true, mode: 'split' });
+      }
       log('play ERR', id, e.code || '', String(e.message).slice(0, 120), ua(req));
       if (e.code === 'live') {
         return json(res, 422, {
