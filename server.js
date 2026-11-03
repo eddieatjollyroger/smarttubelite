@@ -18,7 +18,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-02.3';
+const BUILD = '2026-11-02.4';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -29,6 +29,11 @@ const tokens = new Map();
 // HLS/MSI player sessions: video+audio playlist URLs plus the metadata needed to
 // build a master playlist with one <video> element on the client.
 const hlsTokens = new Map();
+
+// Thumbnails are served from this Pi instead of i.ytimg.com. VIDAA's browser
+// proved unreliable at fetching third-party images (and blanks them all when
+// its image cache is under pressure), while same-origin HTTP always works.
+const thumbCache = new Map();
 
 // Small in-memory ring buffer so the TV's behaviour can be inspected from a
 // Mac (`/logs`) or with `docker compose logs`, without SSHing around.
@@ -578,6 +583,50 @@ async function handle(req, res) {
     return proxyMedia(req, res, u, ok);
   }
 
+  // Grid thumbnails. Same-origin, so the TV never has to reach i.ytimg.com and
+  // does not depend on YouTube's signed ?sqp= URLs staying valid.
+  if (path === '/api/thumb') {
+    const id = url.searchParams.get('id') || '';
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return json(res, 400, { error: 'bad video id' });
+    const wanted = url.searchParams.get('q') === 'mqdefault' ? 'mqdefault' : 'hq720';
+    const key = id + '/' + wanted;
+    const hit = thumbCache.get(key);
+    if (hit) {
+      res.writeHead(200, {
+        'content-type': 'image/jpeg',
+        'cache-control': 'public, max-age=86400',
+        'content-length': hit.length,
+      });
+      return res.end(hit);
+    }
+    const variants = wanted === 'hq720' ? ['hq720', 'mqdefault'] : ['mqdefault'];
+    for (const v of variants) {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 8000);
+      try {
+        const up = await fetch(`https://i.ytimg.com/vi/${id}/${v}.jpg`, {
+          headers: { 'user-agent': UA },
+          signal: ac.signal,
+        });
+        clearTimeout(timer);
+        if (!up.ok) continue;
+        const buf = Buffer.from(await up.arrayBuffer());
+        if (!buf.length) continue;
+        if (thumbCache.size > 400) thumbCache.clear();
+        thumbCache.set(key, buf);
+        res.writeHead(200, {
+          'content-type': 'image/jpeg',
+          'cache-control': 'public, max-age=86400',
+          'content-length': buf.length,
+        });
+        return res.end(buf);
+      } catch (e) {
+        clearTimeout(timer);
+      }
+    }
+    return json(res, 404, { error: 'no thumbnail' });
+  }
+
   // hls.js, served locally so the TV doesn't need internet for the player.
   if (path === '/player.js') {
     try {
@@ -689,22 +738,33 @@ async function handle(req, res) {
     if (useHls) {
       try {
         const info = await resolveHlsStream(id, { height: h, fresh });
-        if (!info.live) {
-          if (prefetch) return json(res, 200, { ok: true, mode: 'mse', height: info.height });
-          const tok = makeHlsToken(info);
-          log('play hls', id, `${info.height}p`, info.vcodec, info.acodec, ua(req));
+        if (info.live) {
+          // The HLS probe already identified the stream as live and handed
+          // back the hls_variant master. Returning it here skips the second
+          // yt-dlp resolve that made livestreams slow to start.
+          if (prefetch) return json(res, 200, { ok: true, mode: 'live' });
+          log('play live hls', id, ua(req));
           return json(res, 200, {
+            live: true,
             title: info.title,
-            duration: info.duration,
-            hls: `/api/hls/master?tok=${tok}`,
-            height: info.height,
-            width: info.width,
-            vcodec: info.vcodec,
-            acodec: info.acodec,
-            mode: 'mse',
+            hls: `/api/hls?u=${b64u(info.hls)}`,
+            height: 0,
           });
         }
-        // Livestream: use the proven live manifest path below.
+        if (prefetch) return json(res, 200, { ok: true, mode: 'mse', height: info.height });
+        const tok = makeHlsToken(info);
+        log('play hls', id, `${info.height}p`, info.vcodec, info.acodec, ua(req));
+        return json(res, 200, {
+          title: info.title,
+          duration: info.duration,
+          hls: `/api/hls/master?tok=${tok}`,
+          height: info.height,
+          width: info.width,
+          vcodec: info.vcodec,
+          acodec: info.acodec,
+          heights: info.heights || [],
+          mode: 'mse',
+        });
       } catch (e) {
         log('hls ERR', id, String(e.message).slice(0, 100), ua(req));
       }
@@ -746,6 +806,7 @@ async function handle(req, res) {
         height: info.height,
         vcodec: info.vcodec || null,
         acodec: info.acodec || null,
+        heights: info.heights || [],
         mode: 'split',
       });
     } catch (e) {

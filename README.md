@@ -55,22 +55,34 @@ hidden overlay; the tile click opens it in place and the URL is updated with
 it uses the same player script.
 
 The player is cinema-style: video fills the screen and the title/control bars fade
-out after a few seconds; any key brings them back. The **Quality** sheet lists only
-the resolutions that video has and remembers your pick; **Automatic** goes back to
-the 720p-first cascade. Clicking/tapping the picture also play-pauses.
+out after a few seconds; any key brings them back. Up from the bottom row focuses the
+timeline (Left/Right seek 10 s), Up again reaches **Back**, and Down walks back down.
+The **Quality** sheet lists only the resolutions that video has and remembers your
+pick; it opens instantly because `/api/play` already sends the list, so no second
+`yt-dlp` run is needed. **Automatic** goes back to the 720p-first cascade.
+Clicking/tapping the picture also play-pauses.
 
 VOD uses a single MSE pipeline: YouTube's H.264 **HLS video playlist** plus its
 matching **audio playlist** are fed to hls.js, which presents one `<video>` element.
 The old split progressive path (a video element *and* a separate audio element,
 often with a 100 MB+ open-ended download) is what wedged VIDAA's media stack, so it
-is now only a fallback for videos with no HLS pair. Livestreams already used this
-single-element HLS path.
+is now only a fallback for videos with no HLS pair. Livestreams use the same single
+element; the first `yt-dlp` probe now returns the `hls_variant` master directly, so a
+live channel starts from one resolve instead of two (and hls.js gets every level
+instead of one fixed variant).
 
 Tiles are prefetched 300 ms after the remote stops on them, and the prefetch shares
 the same in-flight `yt-dlp` run as the play request. That removes most of the 10 s+
-resolve gap: if the OK gesture is still active when the stream is ready, playback
-starts **unmuted immediately**. If the gesture is gone, it starts muted (always
-allowed) and one OK press turns the sound on.
+resolve gap. Chromium allows unmuted playback for the rest of the page after any key
+press (`hasBeenActive`), which outlives the ~5 s `isActive` window, so playback starts
+**unmuted** even when the resolve is slow. If sound is genuinely refused, it starts
+muted (always allowed) and one OK press turns the sound on.
+
+Grid thumbnails are proxied by the Pi (`/api/thumb`) instead of loading from
+`i.ytimg.com`. VIDAA's browser proved unreliable at third-party images and blanked
+the whole grid, and same-origin HTTP avoids YouTube's signed thumbnail URLs as well
+as DNS/TLS surprises. The proxy caches JPEGs in memory and steps from `hq720` down
+to `mqdefault` if a large one is unavailable.
 
 If something pauses the stream on its own (the browser's autoplay policy, a stalled
 fragment, a decoder reset) the player resumes it, the way a set-top box does. It

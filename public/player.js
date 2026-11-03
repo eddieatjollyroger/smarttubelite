@@ -16,6 +16,7 @@
   var hud = document.getElementById('hud');
   var ov = document.getElementById('ov');
   var bar = document.getElementById('ovb');
+  var backBtn = document.getElementById('back');
   var clock = document.getElementById('clock');
   var prog = document.getElementById('prog');
   var progfill = document.getElementById('progfill');
@@ -33,7 +34,8 @@
   var resumeAt = 0;
   var userPaused = false;
   var soundBlocked = false;
-  var hideTimer = null;
+  var hudTimer = null;
+  var barTimer = null;
   var barOn = false;
   var panelKind = null;
   var cmtToken = null;
@@ -41,6 +43,7 @@
   var lastClock = '';
   var started = false;
   var isLive = false;
+  var curHeights = null;
   var hls = null;
   var hlsOff = false;
   var hlsFatalRetries = 0;
@@ -71,7 +74,13 @@
   // (VIDAA dislikes that dance). Prefetching keeps the gap short.
   function hasGesture() {
     try {
-      return !!(navigator.userActivation && navigator.userActivation.isActive);
+      var ua = navigator.userActivation;
+      if (!ua) return false;
+      // isActive is the ~5 s transient window: far shorter than a cold yt-dlp
+      // resolve on the Pi. Chromium (VIDAA included) grants unmuted playback
+      // for the rest of the page once the viewer has pressed any key, which is
+      // what hasBeenActive records — the tile OK still counts.
+      return !!(ua.isActive || ua.hasBeenActive);
     } catch (e) {
       return false;
     }
@@ -142,11 +151,15 @@
       code: v.error ? v.error.code : 0, acode: a.error ? a.error.code : 0 });
   }
 
-  function hint(msg, sticky) {
+  // ms = how long to show it. `true` still means "keep it up", but almost
+  // nothing should: a status that outlives the control bar looks like a bug.
+  function hint(msg, ms) {
     hud.textContent = msg;
     hud.className = 'hud';
-    if (hideTimer) clearTimeout(hideTimer);
-    if (!sticky) hideTimer = setTimeout(function () { hud.className = 'hud hide'; }, 5000);
+    if (hudTimer) clearTimeout(hudTimer);
+    if (ms === true) return;
+    var d = typeof ms === 'number' ? ms : 5000;
+    hudTimer = setTimeout(function () { hud.className = 'hud hide'; }, d);
   }
 
   function fmt(s) {
@@ -160,6 +173,8 @@
     barOn = on;
     ov.className = on ? 'ov' : 'ov hide';
     bar.className = on ? 'ovb' : 'ovb hide';
+    // The time readout belongs to the control bar, not to the picture.
+    clock.className = on ? 'clock' : 'clock hide';
     if (!on) {
       try { document.activeElement.blur(); } catch (e) {}
     }
@@ -168,8 +183,8 @@
   function chrome() {
     if (!active) return;
     setBar(true);
-    if (hideTimer) clearTimeout(hideTimer);
-    hideTimer = setTimeout(function () {
+    if (barTimer) clearTimeout(barTimer);
+    barTimer = setTimeout(function () {
       if (!v.paused && !panelKind) setBar(false);
     }, 5000);
   }
@@ -242,6 +257,9 @@
       abortRetries = 0;
       if (!v.muted) {
         // The failure may just be the sound: muted playback is always allowed.
+        // Do not let maybeUnmute() immediately retry the unmute that was just
+        // refused — one OK from the viewer will clear this.
+        soundBlocked = true;
         v.muted = true;
         if (a.src) a.muted = true;
         setTimeout(function () { if (seq === loadSeq) tryPlay(); }, 250);
@@ -261,7 +279,7 @@
     // (muted is always allowed) and let one OK press enable sound.
     if (!hasGesture()) {
       soundBlocked = true;
-      hint('Sound off — press OK for sound', true);
+      hint('Sound off — press OK for sound', 9000);
       return;
     }
     v.muted = false;
@@ -272,7 +290,7 @@
         v.muted = true;
         if (a.src) a.muted = true;
         retryMuted();
-        hint('Sound off — press OK for sound', true);
+        hint('Sound off — press OK for sound', 9000);
       }
     }, 700);
   }
@@ -307,6 +325,7 @@
     started = true;
     abortRetries = 0;
     audioGaveUp = false;
+    curHeights = info.heights || null;
     ttl.textContent = info.title || id;
     document.title = (info.title || 'TubeTV') + ' · TubeTV';
     v.muted = !hasGesture();
@@ -335,10 +354,13 @@
   function attachHls(info, live) {
     started = true;
     isLive = !!live;
+    // Resolutions came with /api/play, so the cogwheel can paint instantly
+    // instead of waiting on another yt-dlp run.
+    curHeights = (!live && info.heights && info.heights.length) ? info.heights : null;
     ttl.textContent = info.title || (live ? 'Live' : id);
     document.title = (info.title || (live ? 'Live' : 'TubeTV')) + ' · TubeTV';
     prog.style.display = live ? 'none' : 'block';
-    if (live) hint('LIVE', true);
+    if (live) hint('LIVE', 4000);
     v.muted = !hasGesture();
     report(live ? 'live-attach' : 'hls-attach', {
       hasMSE: typeof window.MediaSource !== 'undefined',
@@ -446,7 +468,7 @@
         });
         hls.attachMedia(v);
         hls.loadSource(info.hls);
-        hint(live ? 'LIVE — starting…' : 'Starting…', !!live);
+        hint(live ? 'LIVE — starting…' : 'Starting…', live ? 4000 : 8000);
       });
     } else if (live && v.canPlayType('application/vnd.apple.mpegurl')) {
       v.src = info.hls;
@@ -526,16 +548,16 @@
     hlsFatalRetries = 0;
     closePanel();
     restart();
-    hint('Quality: ' + h + 'p', true);
+    hint('Quality: ' + h + 'p', 4000);
   }
 
   function seek(delta) {
-    if (isLive) { hint('Live stream — no seeking', true); return; }
+    if (isLive) { hint('Live stream — no seeking', 3000); return; }
     try {
       v.currentTime = Math.max(0, v.currentTime + delta);
       if (a.src) a.currentTime = v.currentTime;
     } catch (e) {}
-    hint((delta > 0 ? '+' : '') + delta + 's · ' + fmt(v.currentTime), true);
+    hint((delta > 0 ? '+' : '') + delta + 's · ' + fmt(v.currentTime), 2500);
     chrome();
   }
 
@@ -563,7 +585,7 @@
     panelKind = kind;
     panel.className = 'panel ' + (kind === 'comments' ? 'cmt' : 'qual');
     panelBody.scrollTop = 0;
-    if (hideTimer) clearTimeout(hideTimer);
+    if (barTimer) clearTimeout(barTimer);
     setBar(false);
     if (kind === 'quality') renderQuality();
     else renderComments(true);
@@ -579,8 +601,51 @@
     chrome();
   }
 
+  function paintQuality(hs) {
+    var html = '';
+    for (var i = 0; i < hs.length; i++) {
+      html += '<button class="row" data-h="' + hs[i] + '"><span>' + hs[i] + 'p</span>' +
+        (hs[i] === tiers[tier].h ? '<span class="chk">current</span>' : '') + '</button>';
+    }
+    if (!html) html = '<div class="pnote">No selectable formats for this video.</div>';
+    html += '<button class="row" id="qauto"><span>Automatic</span><span class="chk">720p, step down</span></button>';
+    panelBody.innerHTML = html;
+
+    var rows = panelBody.querySelectorAll('button[data-h]');
+    for (var k = 0; k < rows.length; k++) {
+      rows[k].addEventListener('click', function () {
+        setQuality(parseInt(this.getAttribute('data-h'), 10));
+      });
+    }
+    var auto = document.getElementById('qauto');
+    if (auto) {
+      auto.addEventListener('click', function () {
+        try { localStorage.removeItem('tubetv.h'); } catch (e) {}
+        tiers = makeTiers(720);
+        tier = 0;
+        hlsOff = false;
+        hlsFatalRetries = 0;
+        closePanel();
+        restart();
+        hint('Quality: automatic (720p)', 4000);
+      });
+    }
+    var first = panelBody.querySelector('button.row');
+    if (first) first.focus();
+  }
+
   function renderQuality() {
     panelTitle.textContent = 'Quality';
+    if (isLive) {
+      panelBody.innerHTML = '<div class="pnote">Livestream: quality follows the network automatically.</div>';
+      return;
+    }
+    // Fast path: /api/play already told us the resolutions, so there is nothing
+    // to wait for. Re-resolve only when this video arrived without them.
+    if (curHeights && curHeights.length) {
+      paintQuality(curHeights);
+      return;
+    }
     panelBody.innerHTML = '<div class="pnote">Checking available formats…</div>';
     fetch('/api/qualities?id=' + encodeURIComponent(id), { cache: 'no-store' })
       .then(function (r) { return r.json(); })
@@ -591,36 +656,8 @@
           return;
         }
         var hs = (j && j.heights) || [];
-        var html = '';
-        for (var i = 0; i < hs.length; i++) {
-          html += '<button class="row" data-h="' + hs[i] + '"><span>' + hs[i] + 'p</span>' +
-            (hs[i] === tiers[tier].h ? '<span class="chk">current</span>' : '') + '</button>';
-        }
-        if (!html) html = '<div class="pnote">No selectable formats for this video.</div>';
-        html += '<button class="row" id="qauto"><span>Automatic</span><span class="chk">720p, step down</span></button>';
-        panelBody.innerHTML = html;
-
-        var rows = panelBody.querySelectorAll('button[data-h]');
-        for (var k = 0; k < rows.length; k++) {
-          rows[k].addEventListener('click', function () {
-            setQuality(parseInt(this.getAttribute('data-h'), 10));
-          });
-        }
-        var auto = document.getElementById('qauto');
-        if (auto) {
-          auto.addEventListener('click', function () {
-            try { localStorage.removeItem('tubetv.h'); } catch (e) {}
-            tiers = makeTiers(720);
-            tier = 0;
-            hlsOff = false;
-            hlsFatalRetries = 0;
-            closePanel();
-            restart();
-            hint('Quality: automatic (720p)', true);
-          });
-        }
-        var first = panelBody.querySelector('button.row');
-        if (first) first.focus();
+        if (hs.length) curHeights = hs;
+        paintQuality(hs);
       })
       .catch(function () {
         if (panelKind === 'quality') panelBody.innerHTML = '<div class="pnote">Could not list formats.</div>';
@@ -679,7 +716,7 @@
   v.addEventListener('playing', function () {
     startBtn.style.display = 'none';
     if (!isLive && hud.textContent === 'Starting…') hud.className = 'hud hide';
-    if (isLive) { lastClock = ''; updateClock(); hint('LIVE', true); }
+    if (isLive) { lastClock = ''; updateClock(); hint('LIVE', 4000); }
     if (!a.src) return;
     if (Math.abs(a.currentTime - v.currentTime) > 0.25) {
       try { a.currentTime = v.currentTime; } catch (e) {}
@@ -767,7 +804,7 @@
     var t = tiers[tier];
     freshRetries = 0;
     audioRetries = 0;
-    hint('Trying ' + (t.muxed ? 'the compatible stream' : t.h + 'p') + '…', true);
+    hint('Trying ' + (t.muxed ? 'the compatible stream' : t.h + 'p') + '…', 8000);
     report('step-down', { why: why, tier: tier });
     loadSeq++;
     teardown();
@@ -818,7 +855,7 @@
 
       if (!warned && idle > 4000) {
         warned = true;
-        hint('Loaded, but playback is not starting — trying a compatible format…', true);
+        hint('Loaded, but playback is not starting — trying a compatible format…', 8000);
         report('frozen', { rs: v.readyState, ns: v.networkState, tier: tier, t: t });
       }
 
@@ -905,7 +942,7 @@
       a.removeAttribute('src');
       a.load();
     } catch (e) {}
-    hint('Sound unavailable for this stream', true);
+    hint('Sound unavailable for this stream', 8000);
   }
 
   // --- buttons ----------------------------------------------------------
@@ -926,6 +963,8 @@
 
   // --- open / close on grid pages ---------------------------------------
   function resetChrome() {
+    if (hudTimer) clearTimeout(hudTimer);
+    if (barTimer) clearTimeout(barTimer);
     err.style.display = 'none';
     startBtn.style.display = 'none';
     hud.className = 'hud hide';
@@ -1085,7 +1124,8 @@
     // Make OK turn sound on from anywhere except a focused control or sheet row.
     if (isOk(c, k) && v.muted && !v.paused &&
         startBtn.style.display === 'none' &&
-        ctlBtns.indexOf(document.activeElement) < 0) {
+        ctlBtns.indexOf(document.activeElement) < 0 &&
+        document.activeElement !== prog && document.activeElement !== backBtn) {
       e.preventDefault();
       unmute();
       hint('Sound on');
@@ -1093,16 +1133,46 @@
       return;
     }
 
-    // Control bar visible: arrows move between buttons, Enter activates.
+    // Control bar visible: Left/Right move along the bottom row, Up climbs to
+    // the timeline and then to Back, Down comes back down.
     if (barOn) {
       var bi = ctlBtns.indexOf(document.activeElement);
-      if (isLeft(c, k)) { e.preventDefault(); focusBtn(bi < 0 ? 0 : bi - 1); return; }
-      if (isRight(c, k)) { e.preventDefault(); focusBtn(bi < 0 ? 0 : bi + 1); return; }
-      if (isUp(c, k) || isDown(c, k)) { e.preventDefault(); setBar(false); return; }
+      var onProg = document.activeElement === prog;
+      var onBack = document.activeElement === backBtn;
+      if (isUp(c, k)) {
+        e.preventDefault();
+        if (onBack) { /* already at the top */ }
+        else if (onProg) backBtn.focus();
+        else if (prog.style.display !== 'none') prog.focus();
+        else backBtn.focus();
+        chrome();
+        return;
+      }
+      if (isDown(c, k)) {
+        e.preventDefault();
+        if (onBack) { if (prog.style.display !== 'none') prog.focus(); else focusBtn(0); }
+        else if (onProg) focusBtn(0);
+        else { setBar(false); return; }
+        chrome();
+        return;
+      }
+      if (onBack) {
+        if (isOk(c, k)) { e.preventDefault(); backBtn.click(); }
+        return;
+      }
+      if (onProg) {
+        if (isLeft(c, k)) { e.preventDefault(); seek(-10); return; }
+        if (isRight(c, k)) { e.preventDefault(); seek(10); return; }
+        if (isOk(c, k)) { e.preventDefault(); toggle(); return; }
+        return;
+      }
+      if (isLeft(c, k)) { e.preventDefault(); focusBtn(bi < 0 ? 0 : bi - 1); chrome(); return; }
+      if (isRight(c, k)) { e.preventDefault(); focusBtn(bi < 0 ? 0 : bi + 1); chrome(); return; }
       if (isOk(c, k)) {
         e.preventDefault();
         if (bi >= 0) ctlBtns[bi].click();
         else focusBtn(0);
+        chrome();
         return;
       }
     }
@@ -1110,7 +1180,10 @@
     if (isUp(c, k) || isDown(c, k)) {
       e.preventDefault();
       chrome();
-      focusBtn(0);
+      if (isUp(c, k)) {
+        if (prog.style.display !== 'none') prog.focus();
+        else backBtn.focus();
+      } else focusBtn(0);
       return;
     }
     if (isLeft(c, k)) { e.preventDefault(); seek(-10); return; }
