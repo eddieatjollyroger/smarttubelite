@@ -64,6 +64,7 @@
   var pushed = false;
   var lastScroll = 0;
   var prefetchTimer = null;
+  var rampTimer = null;
   var prefetchId = '';
   var prefetchBusy = false;
   var prefetchQueued = '';
@@ -144,6 +145,61 @@
       if (lh > 0 && lh >= bestH) { bestH = lh; best = i; }
     }
     return best;
+  }
+
+  // Highest level at or below a height, for a staged climb. Keeping ABR under a
+  // 1080p cap for the first seconds avoids the jump straight from the 720p
+  // start to a 4K fragment, which can drain the buffer and black the screen.
+  function capAt(h) {
+    if (!hls || !hls.levels) return -1;
+    var best = -1;
+    var bestH = 0;
+    for (var i = 0; i < hls.levels.length; i++) {
+      var lh = hls.levels[i].height || 0;
+      if (lh > 0 && lh <= h && lh >= bestH) { bestH = lh; best = i; }
+    }
+    return best;
+  }
+
+  function clearRamp() {
+    if (rampTimer) {
+      clearTimeout(rampTimer);
+      rampTimer = null;
+    }
+  }
+
+  // Hand quality back to ABR without hls.js's *immediate* switch. Setting
+  // currentLevel pauses the element and flushes the buffer, which is the black
+  // screen seen when the 720p start released to ABR. loadLevel just clears the
+  // manual pick; ABR switches at the next fragment while playback continues.
+  function releaseAuto(cap) {
+    clearRamp();
+    try { hls.autoLevelCapping = cap; } catch (e) {}
+    try { hls.loadLevel = -1; } catch (e) {}
+  }
+
+  // Let ABR climb one tier at a time after a safe start or a 4K stall. Raising
+  // the cap instead of forcing a level keeps the switch at a fragment boundary,
+  // and each step adds only a modest bitrate jump.
+  function rampUp(firstCap, fullCap) {
+    clearRamp();
+    var cap1440 = capAt(1440);
+    rampTimer = setTimeout(function () {
+      rampTimer = null;
+      if (pinnedH || !hls || isLive || v.ended) return;
+      if (cap1440 > firstCap) {
+        try { hls.autoLevelCapping = cap1440; } catch (e) {}
+        report('abr-step', { h: 1440 });
+        rampTimer = setTimeout(function () {
+          rampTimer = null;
+          if (pinnedH || !hls || isLive || v.ended) return;
+          try { hls.autoLevelCapping = fullCap; } catch (e) {}
+          report('abr-step', { h: (hls.levels[fullCap] || {}).height || 0 });
+        }, 8000);
+      } else {
+        try { hls.autoLevelCapping = fullCap; } catch (e) {}
+      }
+    }, 8000);
   }
 
   // Distinct live resolutions, best first. hls.js can expose the same height
@@ -496,6 +552,7 @@
         // hiccup; three was tight enough to stall on the TV.
         if (live) cfg.liveSyncDurationCount = 4;
         hls = new window.Hls(cfg);
+        window.__hls = hls;
         hls.on(window.Hls.Events.ERROR, function (ev, data) {
           report('hls-error', { type: data.type, details: data.details, fatal: !!data.fatal });
           if (!data.fatal) {
@@ -563,10 +620,9 @@
           }
           var cap = autoCapIndex();
           if (live) {
-            // Start at 1080p for four seconds, then hand control to ABR. The
-            // old code started at 720p, which left the first picture visibly
-            // soft on a 4K TV; a short pinned 1080p start still gives ABR a
-            // safe fragment while leaving room to climb to 1440p afterwards.
+            // Start at 1080p for four seconds, then hand control to ABR. Live
+            // HLS is AVC-only (a single codec family), so ABR can switch at a
+            // fragment boundary without touching the decoder pipeline.
             var start = levelIndexFor(1080);
             try { hls.autoLevelCapping = cap; } catch (e) {}
             report('live-start', { start: start, cap: cap, n: hls.levels.length });
@@ -574,35 +630,42 @@
               try { hls.startLevel = start; } catch (e) {}
               try { hls.currentLevel = start; } catch (e) {}
               setTimeout(function () {
-                if (!pinnedH) {
-                  try { hls.currentLevel = -1; } catch (e) {}
-                  try { hls.autoLevelCapping = cap; } catch (e) {}
-                }
+                if (!pinnedH) releaseAuto(cap);
               }, 4000);
             }
           } else {
-            // A viewer pick pins that level. Otherwise start at 720p for four
-            // seconds so the first picture is sharp, then hand control to ABR,
-            // which may climb all the way to 4K or step down if the link drops.
+            // The master carries exactly one codec family (H.264 ≤1080, or
+            // VP9 1440/2160 on a VP9-capable TV). Never cross families during
+            // playback: hls.js 0.14 cannot change the MSE SourceBuffer codec,
+            // and the failed append used to flush the buffer and black the
+            // screen right after the 720p start. So start on the best level of
+            // the one family and let ABR only move within it.
             try { hls.autoLevelCapping = cap; } catch (e) {}
-            if (pinnedH) {
-              var idx = levelIndexFor(pinnedH);
-              if (idx >= 0) {
-                try { hls.currentLevel = idx; } catch (e) {}
-              }
-            } else {
-              var vstart = levelIndexFor(720);
-              if (vstart >= 0) {
-                try { hls.startLevel = vstart; } catch (e) {}
-                try { hls.currentLevel = vstart; } catch (e) {}
-                setTimeout(function () {
-                  if (!pinnedH) {
-                    try { hls.currentLevel = -1; } catch (e) {}
-                    try { hls.autoLevelCapping = cap; } catch (e) {}
-                  }
-                }, 4000);
+            var idx = pinnedH ? levelIndexFor(pinnedH) : cap;
+            if (pinnedH && idx >= 0) {
+              // A saved 1080p pick on a VP9-only master is not a real level.
+              // Pin the closest one the master actually has.
+              var actual = hls.levels[idx].height || 0;
+              if (actual && actual !== pinnedH) {
+                pinnedH = actual;
+                try { localStorage.setItem('tubetv.h', String(actual)); } catch (e) {}
               }
             }
+            if (idx >= 0) {
+              try { hls.startLevel = idx; } catch (e) {}
+              try { hls.currentLevel = idx; } catch (e) {}
+            }
+            report('hls-start', {
+              h: idx >= 0 ? (hls.levels[idx].height || 0) : 0,
+              pinned: !!pinnedH,
+              n: hls.levels.length
+            });
+            // Give the first fragments a moment, then let ABR step down if the
+            // link cannot sustain the starting level. Same codec, so the switch
+            // is seamless; the watchdog handles a full stall.
+            setTimeout(function () {
+              if (!pinnedH && hls && !isLive) releaseAuto(cap);
+            }, 4000);
             if (resumeAt > 1) {
               try { v.currentTime = resumeAt; } catch (e) {}
             }
@@ -665,6 +728,7 @@
   function teardown() {
     stopWatchdog();
     stopElapsed();
+    clearRamp();
     if (hls) {
       try { hls.destroy(); } catch (e) {}
       hls = null;
@@ -698,9 +762,10 @@
     if (hls) {
       var idx = levelIndexFor(h);
       if (idx >= 0) {
+        clearRamp();
         try {
           hls.autoLevelCapping = autoCapIndex();
-          hls.currentLevel = idx;
+          hls.nextLevel = idx;
         } catch (e) {}
         closePanel();
         hint('Quality: ' + (hls.levels[idx].height || h) + 'p', 4000);
@@ -801,10 +866,7 @@
         tiers = makeTiers(720);
         tier = 0;
         if (hls) {
-          try {
-            hls.autoLevelCapping = autoCapIndex();
-            hls.currentLevel = -1;
-          } catch (e) {}
+          releaseAuto(autoCapIndex());
           closePanel();
           hint('Quality: automatic', 4000);
           chrome();
@@ -1062,10 +1124,7 @@
             // ABR instead of freezing the stream.
             pinnedH = 0;
             try { localStorage.removeItem('tubetv.h'); } catch (e) {}
-            try {
-              hls.autoLevelCapping = autoCapIndex();
-              hls.currentLevel = -1;
-            } catch (e) {}
+            releaseAuto(autoCapIndex());
             hint('Live quality stalled — automatic', 5000);
           } else {
             hint('Reconnecting live…', 5000);
@@ -1087,19 +1146,19 @@
       }
 
       if (idle < limit) return;
-      // An explicit 4K pick that cannot keep up should fall back to adaptive
-      // 1080p, not abandon the whole HLS pipeline for the split path.
-      if (hls && !isLive && hls.currentLevel >= 0) {
-        var lh = (hls.levels[hls.currentLevel] || {}).height || 0;
+      // A 4K picture that cannot keep up (pinned or chosen by ABR) drops to
+      // 1080p and climbs back gradually, instead of tearing down HLS.
+      if (hls && !isLive) {
+        var lh = pinnedH || v.videoHeight || 0;
         if (lh > 1080) {
-          report('uhd-drop', { from: lh, rs: v.readyState });
+          report('uhd-drop', { from: lh, pinned: !!pinnedH, rs: v.readyState });
           pinnedH = 0;
           try { localStorage.removeItem('tubetv.h'); } catch (e) {}
-          try {
-            hls.autoLevelCapping = autoCapIndex();
-            hls.currentLevel = -1;
-          } catch (e) {}
-          hint('4K stalled — adaptive up to 1080p', 6000);
+          var lowCap = capAt(1080);
+          if (lowCap < 0) lowCap = autoCapIndex();
+          releaseAuto(lowCap);
+          rampUp(lowCap, autoCapIndex());
+          hint('4K stalled — back to 1080p', 6000);
           lastT = -1;
           lastMove = Date.now();
           warned = false;
