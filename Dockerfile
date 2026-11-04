@@ -19,6 +19,24 @@ RUN set -eux; \
     chmod 755 /usr/local/bin/yt-dlp; \
     /usr/local/bin/yt-dlp --version
 
+# QuickJS-NG is the optional fallback solver for the rare video that exposes no
+# HLS pair without JavaScript. It solves the challenge in a few MB instead of the
+# >100 MB a V8/Node solve needs, so it cannot push a small Pi into swap. Normal
+# HLS resolves use no runtime at all (`YTDLP_JS_RUNTIME=none`). The release
+# binary is static-pie, so it runs on the slim image as-is. yt-dlp picks it up
+# as `--js-runtimes quickjs`.
+ARG QJS_VERSION=0.18.0
+RUN set -eux; \
+    case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+      arm64|aarch64) qjs=qjs-linux-aarch64 ;; \
+      amd64|x86_64)  qjs=qjs-linux-x86_64 ;; \
+      *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/quickjs-ng/quickjs/releases/download/v${QJS_VERSION}/${qjs}" \
+      -o /usr/local/bin/qjs; \
+    chmod 755 /usr/local/bin/qjs; \
+    /usr/local/bin/qjs --version
+
 WORKDIR /app
 COPY package.json ./
 COPY server.js ./
@@ -28,7 +46,10 @@ RUN mkdir -p /app/data
 
 ENV PORT=8484 \
     HOST=0.0.0.0 \
-    YTDLP=/usr/local/bin/yt-dlp
+    YTDLP=/usr/local/bin/yt-dlp \
+    YTDLP_JS_RUNTIME=none \
+    YTDLP_JS_FALLBACK=quickjs \
+    YTDLP_TIMEOUT_MS=45000
 
 EXPOSE 8484
 

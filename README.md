@@ -78,12 +78,22 @@ a live channel starts from one resolve instead of two (and hls.js gets every lev
 instead of one fixed variant). Live playback starts at 720p and releases to ABR after
 four seconds.
 
+**4K is opt-in.** YouTube only publishes 1440p/2160p as VP9, so the player first asks
+MediaSource whether it can decode `vp09`. If it can, `/api/play` adds those levels to
+the master and the Quality sheet lists `1440p` / `2160p (4K)`; if it cannot, they are
+never mentioned. Automatic playback is capped at 1080p either way — pick a higher level
+to lift the cap for that video. If an explicit 4K pick cannot keep up, the watchdog
+drops back to adaptive up to 1080p (`uhd-drop`) instead of abandoning HLS.
+
 Tiles are prefetched 300 ms after the remote stops on them, and the prefetch shares
-the same in-flight `yt-dlp` run as the play request. That removes most of the 10 s+
-resolve gap. Chromium allows unmuted playback for the rest of the page after any key
-press (`hasBeenActive`), which outlives the ~5 s `isActive` window, so playback starts
-**unmuted** even when the resolve is slow. If sound is genuinely refused, it starts
-muted (always allowed) and one OK press turns the sound on.
+the same in-flight `yt-dlp` run as the play request. Resolves are also serialized:
+only one yt-dlp (and one challenge solver) runs at a time, and pressing play cancels
+a running prefetch. Before that, three concurrent resolves on the Pi took the load
+average to 35 and made every one of them slower. Chromium allows unmuted playback for
+the rest of the page after any key press (`hasBeenActive`), which outlives the ~5 s
+`isActive` window, so playback starts **unmuted** even when the resolve is slow. If
+sound is genuinely refused, it starts muted (always allowed) and one OK press turns
+the sound on.
 
 Grid thumbnails are proxied by the Pi (`/api/thumb`) instead of loading from
 `i.ytimg.com`. VIDAA's browser proved unreliable at third-party images and blanked
@@ -228,6 +238,10 @@ TV app. Revoke any time at `myaccount.google.com → Security → Third-party co
 | `YT_GL` | `US` | Country for recommendations. Try `PT`, `BR`, etc. |
 | `YT_HL` | `en` | UI language |
 | `YTDLP` | `bin/yt-dlp` | Path to yt-dlp binary; wins over every default (Docker sets `/usr/local/bin/yt-dlp`) |
+| `YTDLP_JS_RUNTIME` | `none` | JS challenge solver used for HLS resolves. `none` is fastest and cannot hang; `quickjs`, `node`, or `quickjs:/path/to/qjs` also work. A comma list is allowed |
+| `YTDLP_JS_FALLBACK` | `quickjs` | One extra resolve with this solver for the rare video with no HLS pair (Docker installs `qjs`). Set `none` to disable |
+| `YTDLP_SPLIT_JS` | `quickjs` | Solver for the progressive split fallback, whose URLs can carry the `n` throttle parameter |
+| `YTDLP_TIMEOUT_MS` | `45000` | Deadline for one yt-dlp resolve (clamped 5–180 s). A timeout is not retried |
 
 ## Performance
 
@@ -241,20 +255,42 @@ copies bytes — so CPU stays flat:
 | Resolving a new video | 0.8–1 CPU-s, 2–3 s, 98 MB peak | see below |
 | RAM | 100–135 MB | same |
 
-Resolution is the one slow step: `yt-dlp` has to run YouTube's player JavaScript
-before it can list formats. Modern yt-dlp does that in a JS runtime instead of a
-deprecated pure-Python path — 1.9 s versus 10–28 s per cold resolve on the Pi. The
-server passes `--js-runtimes node`, and the Docker image already ships Node 22, so the
-fast path is used automatically (if `node` is missing yt-dlp warns and falls back).
-`./run.sh` on a Mac uses whatever `node` is on `PATH`.
+Resolution is the one slow step: `yt-dlp` normally runs YouTube's player JavaScript
+before it can list formats. Build `2026-11-04.1` skips that for the HLS path
+(`YTDLP_JS_RUNTIME=none`): the HLS playlists this app uses do not carry YouTube's `n`
+throttle parameter, and yt-dlp returns all of them in 1–5 s without a solver. The
+previous Node/V8 solver needed >100 MB per solve; on a 4 GB Pi it could fall into swap
+and hang past the resolve deadline, which is exactly what made VOD starts time out.
+
+If a video exposes no HLS video+audio pair, the server retries once with **QuickJS**
+(`YTDLP_JS_FALLBACK=quickjs`) — a small single-threaded C runtime that writes the
+challenge to a temp file and solves it in a few MB. The Docker image installs the
+static `qjs` binary for that fallback. The progressive split fallback also asks for
+QuickJS (`YTDLP_SPLIT_JS`), because those URLs are the ones that can need `n` solving.
+
+On a Mac, plain `node ./run.sh` does not need a runtime for normal HLS playback. If you
+want the fallbacks to work there too, put `qjs` on `PATH` or set
+`YTDLP_JS_FALLBACK=quickjs:/path/to/qjs`. A missing solver is ignored by yt-dlp, so
+nothing breaks without it.
+
+Every resolve is serialized (one yt-dlp at a time) and a play request cancels a
+running prefetch. A timeout is final: the server does not fall through to a second
+resolver, which previously doubled a failed start. The default deadline is 45 s
+(`YTDLP_TIMEOUT_MS`); a timeout is logged with whether the whole process group was
+killed. Leftover Node/QJS children were what kept the Pi load average high.
 
 To see where the seconds go on the host, open `http://<host>:8484/diag/sys`. It reports
-Node/platform/CPU/memory, DNS lookup time for IPv4 and IPv6, an HTTPS probe, and the
-yt-dlp binary in use. Add `?resolve=<videoId>` to include one fresh cold resolve:
+Node/platform/CPU/memory (including `/proc/meminfo` and swap), DNS lookup time for IPv4
+and IPv6, an HTTPS probe, the yt-dlp binary, the JS runtime and timeout, and the
+current resolve queue. Add `?resolve=<videoId>` to include one fresh cold resolve:
 
 ```
 http://<host>:8484/diag/sys?resolve=aqz-KE-bpKQ
 ```
+
+Add `&timeout=120000` to give a cold resolve more than the playback deadline (clamped
+to 5–180 s). On failure the response includes `killed` and the tail of yt-dlp's
+stderr, so a broken JS runtime is visible without SSH.
 
 A slow `dns6` with a fast `dns4` is a broken IPv6 route (yt-dlp runs with
 `--force-ipv4` for exactly that reason); a slow `resolve` with fast `dns4`/`http`
@@ -279,7 +315,10 @@ TV), so budget ~2× the video bitrate. Gigabit ethernet is plenty.
   while the feeds use the TV one.
 - No Shorts, no channel pages, no casting.
 - Unofficial: uses InnerTube and a public OAuth client. Google can change either at any time.
-- Only 1080p H.264. VIDAA's browser usually can't do VP9/AV1 or 4K.
+- Automatic quality tops out at **1080p H.264**. YouTube serves 1440p/2160p only as
+  VP9; they appear in the Quality sheet (and are allowed by ABR) only when the TV's
+  `MediaSource` reports `vp09` support, and only after you pick one explicitly.
+  VIDAA browsers that lack VP9 simply never see those entries.
 - 1080p is H.264 *High* profile; many TV decoders only do *Main*. That is why the
   player steps down to 720p, which YouTube serves as Main profile (`avc1.4D401F`).
 - Audio and video are separate HLS streams muxed by hls.js into one `<video>`; the
@@ -315,9 +354,12 @@ watchdog detects exactly this and steps down to the next quality tier.
 
 `http://<host>:8484/logs` shows the last 250 server log lines — every `/api/play`
 and `/api/media` request, with the TV's user agent, HTTP status, range and size.
-Every `yt-dlp` run is logged with its duration (`ytdlp <id> 2700ms ok …`), so a slow
-start is easy to tell from a stall. `http://<host>:8484/diag/sys` measures the host
-side (DNS4/DNS6, HTTPS, binary, and optionally one cold resolve).
+Every `yt-dlp` run is logged with its duration and solver
+(`ytdlp <id> 2000ms ok js=none …`), so a slow start is easy to tell from a stall.
+A timed-out run is one line (`ytdlp <id> ERR yt-dlp timed out (kill: group)`), and a
+`play hls <id> … <n>lv+vp9` line shows how many levels the master really had.
+`http://<host>:8484/diag/sys` measures the host side (DNS4/DNS6, HTTPS, binary,
+memory/swap, resolve queue, and optionally one cold resolve).
 
 The player also logs quality tiers, autoplay blocks, decode errors, stalls and HLS
 errors, so the first failure is visible in `/logs` without reproducing it.

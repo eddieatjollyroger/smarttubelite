@@ -14,6 +14,8 @@ import {
   binary as ytdlpBinary,
   version as ytdlpVersion,
   queueStats as ytdlpQueue,
+  resolveTimeout as ytdlpTimeout,
+  jsRuntime as ytdlpJsRuntime,
   setLogger as setYtdlpLogger,
 } from './lib/ytdlp.js';
 import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
@@ -21,7 +23,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-02.6';
+const BUILD = '2026-11-04.1';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -594,6 +596,20 @@ async function handle(req, res) {
         return { ms: Date.now() - t, ok: false, error: String(e.message || e).slice(0, 160) };
       }
     };
+    const mem = (() => {
+      try {
+        const t = fs.readFileSync('/proc/meminfo', 'utf8');
+        const get = (k) => Number((t.match(new RegExp('^' + k + ':\\s+(\\d+)', 'm')) || [])[1] || 0);
+        return {
+          totalMB: Math.round(get('MemTotal') / 1024),
+          availMB: Math.round(get('MemAvailable') / 1024),
+          swapTotalMB: Math.round(get('SwapTotal') / 1024),
+          swapFreeMB: Math.round(get('SwapFree') / 1024),
+        };
+      } catch {
+        return null;
+      }
+    })();
     const out = {
       build: BUILD,
       node: process.version,
@@ -601,7 +617,10 @@ async function handle(req, res) {
       cpus: os.cpus().length,
       load: os.loadavg().map((n) => Math.round(n * 100) / 100),
       memFreeMB: Math.round(os.freemem() / 1048576),
+      mem,
       ytdlp: ytdlpBinary(),
+      jsRuntime: ytdlpJsRuntime(),
+      ytdlpTimeoutMs: ytdlpTimeout(),
       resolveQueue: ytdlpQueue(),
       dns4: await timed(() => dns.lookup('www.youtube.com', { family: 4 })),
       dns6: await timed(() => dns.lookup('www.youtube.com', { family: 6 })),
@@ -612,18 +631,29 @@ async function handle(req, res) {
     };
     const rid = url.searchParams.get('resolve') || '';
     if (/^[A-Za-z0-9_-]{11}$/.test(rid)) {
+      // ?timeout=120000 lets a slow Pi finish a cold resolve instead of cutting
+      // it at the normal playback deadline. Useful only for diagnosis.
+      const asked = Number(url.searchParams.get('timeout')) || 0;
+      const tmo = asked ? Math.min(180_000, Math.max(5_000, asked)) : undefined;
       const t = Date.now();
       try {
-        const info = await resolveHlsStream(rid, { height: 720, fresh: true });
+        const info = await resolveHlsStream(rid, { height: 720, fresh: true, timeoutMs: tmo });
         out.resolve = {
           ms: Date.now() - t,
+          js: ytdlpJsRuntime(),
           live: !!info.live,
           heights: info.heights || [],
           levels: info.variants ? info.variants.length : 0,
           title: (info.title || '').slice(0, 60),
         };
       } catch (e) {
-        out.resolve = { ms: Date.now() - t, error: String(e.message || e).slice(0, 160) };
+        out.resolve = {
+          ms: Date.now() - t,
+          js: ytdlpJsRuntime(),
+          error: String(e.message || e).slice(0, 160),
+          killed: e.killed,
+          stderr: String(e.stderr || '').replace(/\s+/g, ' ').slice(-400),
+        };
       }
     }
     return json(res, 200, out);
@@ -851,6 +881,13 @@ async function handle(req, res) {
         // as an error and do not fall through to a second (split) resolve.
         if (e.code === 'CANCELLED') {
           return json(res, 200, { ok: true, cancelled: true, mode: 'mse' });
+        }
+        // A timed-out lookup is final. Falling through to the split resolver
+        // spent another full timeout and was why one failed play could block
+        // the Pi for over a minute.
+        if (e.timeout) {
+          log('play timeout', id, e.killed || '', ua(req));
+          return json(res, 504, { error: 'Stream lookup timed out', timeout: true });
         }
         log('hls ERR', id, String(e.message).slice(0, 100), ua(req));
       }
@@ -1133,6 +1170,7 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, HOST, () => {
   log('start', `build ${BUILD}`, `port ${PORT}`);
   log('start', `yt-dlp ${ytdlpBinary()}`);
+  log('start', `yt-dlp js ${ytdlpJsRuntime()}`, `timeout ${ytdlpTimeout()}ms`);
   ytdlpVersion().then((v) => log('start', `yt-dlp version ${v}`));
   const nets = os.networkInterfaces();
   const lan = [];

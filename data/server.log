@@ -1,15 +1,9 @@
-2026-11-03 02:10:22 start build 2026-11-02.6 port 8484
-2026-11-03 02:10:22 start yt-dlp /Users/joaopacheco/smarttube-lite/bin/yt-dlp
+2026-11-04 02:35:56 start build 2026-11-04.1 port 8484
+2026-11-04 02:35:56 start yt-dlp /Users/joaopacheco/smarttube-lite/bin/yt-dlp
+2026-11-04 02:35:56 start yt-dlp js none timeout 45000ms
 TubeTV running
   local:   http://localhost:8484
   TV:      http://192.168.1.127:8484
-2026-11-03 02:10:23 start yt-dlp version 2026.10.26
-2026-11-03 02:10:44 ytdlp vt0i6nuqNEo 2961ms ok bv*[protocol^=m3u8][vcodec^=avc1][height
-2026-11-03 02:10:44 client player open id=vt0i6nuqNEo {"id":"vt0i6nuqNEo","mode":"overlay","tier":0,"vp9":true,"mse":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-03 02:10:44 client player request id=vt0i6nuqNEo {"tier":0,"q":"/api/play?id=vt0i6nuqNEo&h=720&hls=1&vp9=1"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-03 02:10:44 play hls vt0i6nuqNEo 720p 6lv+vp9 avc1.4D401F mp4a.40.2 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-03 02:10:44 client player hls-attach id=vt0i6nuqNEo {"hasMSE":true,"h":720,"mode":"mse"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-03 02:10:45 client player fullscreen id=vt0i6nuqNEo {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-03 02:10:45 client player playing id=vt0i6nuqNEo {"tier":0,"muted":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-03 02:10:47 client player fullscreen id=vt0i6nuqNEo {"ok":false,"name":"TypeError"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
-2026-11-03 02:10:49 client player panel id=vt0i6nuqNEo {"kind":"quality"} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 02:35:56 start yt-dlp version 2026.10.26
+2026-11-04 02:36:02 ytdlp zNzD8Wjt0w4 3991ms ok js=none bv*[protocol^=m3u8][vcodec^=avc1][height
+2026-11-04 02:36:02 play hls zNzD8Wjt0w4 720p 4lv avc1.4D4020 mp4a.40.2 curl/8.1.2
