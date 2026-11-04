@@ -1,9 +1,7 @@
-2026-11-04 02:35:56 start build 2026-11-04.1 port 8484
-2026-11-04 02:35:56 start yt-dlp /Users/joaopacheco/smarttube-lite/bin/yt-dlp
-2026-11-04 02:35:56 start yt-dlp js none timeout 45000ms
+2026-11-04 03:50:19 start build 2026-11-04.3 port 8484
+2026-11-04 03:50:19 start yt-dlp /Users/joaopacheco/smarttube-lite/bin/yt-dlp
+2026-11-04 03:50:19 start yt-dlp js none timeout 45000ms
 TubeTV running
   local:   http://localhost:8484
   TV:      http://192.168.1.127:8484
-2026-11-04 02:35:56 start yt-dlp version 2026.10.26
-2026-11-04 02:36:02 ytdlp zNzD8Wjt0w4 3991ms ok js=none bv*[protocol^=m3u8][vcodec^=avc1][height
-2026-11-04 02:36:02 play hls zNzD8Wjt0w4 720p 4lv avc1.4D4020 mp4a.40.2 curl/8.1.2
+2026-11-04 03:50:20 start yt-dlp version 2026.10.26

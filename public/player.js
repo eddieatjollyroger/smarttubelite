@@ -131,18 +131,33 @@
     return best;
   }
 
-  // Highest level ABR is allowed to climb to on its own. 1080p is the safe
-  // ceiling: 1440p/4K are opt-in only, because they double or quadruple the
-  // bitrate and an old TV decoder may not sustain them.
+  // Highest level ABR may climb to on its own. The master contains 1440p/2160p
+  // only when this TV reported VP9 support, so the ceiling is simply the best
+  // level on offer: 4K when the link and decoder keep up, otherwise ABR stays
+  // lower by itself. A pinned 4K that cannot keep up is dropped by the watchdog.
   function autoCapIndex() {
     if (!hls || !hls.levels) return -1;
     var best = -1;
     var bestH = 0;
     for (var i = 0; i < hls.levels.length; i++) {
       var lh = hls.levels[i].height || 0;
-      if (lh > 0 && lh <= 1080 && lh >= bestH) { bestH = lh; best = i; }
+      if (lh > 0 && lh >= bestH) { bestH = lh; best = i; }
     }
     return best;
+  }
+
+  // Distinct live resolutions, best first. hls.js can expose the same height
+  // twice (different codecs/bitrates in YouTube's live master), which would
+  // otherwise produce duplicate rows in the quality sheet.
+  function hlsHeights() {
+    if (!hls || !hls.levels) return [];
+    var seen = {};
+    var out = [];
+    for (var i = 0; i < hls.levels.length; i++) {
+      var h = hls.levels[i].height || 0;
+      if (h > 0 && !seen[h]) { seen[h] = 1; out.push(h); }
+    }
+    return out.sort(function (a, b) { return b - a; });
   }
 
   // Warm the server's yt-dlp cache while the viewer browses the grid. The real
@@ -459,11 +474,14 @@
         var cfg = {
           enableWorker: false,
           lowLatencyMode: false,
-          // 4K is opt-in. capping by element size would hide the 2160p level
-          // from a TV whose browser reports a 1080p CSS viewport; autoCapIndex()
-          // below is the real ceiling for automatic playback.
+          // 4K is the automatic ceiling too. Capping by element size would
+          // hide the 2160p level from a TV whose browser reports a 1080p CSS
+          // viewport; autoCapIndex() below is the real ABR ceiling.
           capLevelToPlayerSize: false,
-          abrEwmaDefaultEstimate: 2000000,
+          // A 4K-capable TV still needs a sane first guess. 2 Mbps made ABR
+          // start at 360p and crawl upward for 10-15 s; 4 Mbps starts around
+          // 720p and still steps down fast on a weak link.
+          abrEwmaDefaultEstimate: 4000000,
           // TV browsers have little spare memory. Keep the MSE buffer small;
           // hls.js evicts old fragments as playback advances.
           maxBufferLength: 20,
@@ -474,9 +492,6 @@
           // saves a round trip on a cold start.
           startFragPrefetch: true
         };
-        // Our VOD master lists the renditions low→high, so level 0 is the
-        // cheapest way to get a picture on screen. ABR climbs from there.
-        if (!live) cfg.startLevel = 0;
         // Four fragments of slack keeps a live stream alive through a Wi-Fi
         // hiccup; three was tight enough to stall on the TV.
         if (live) cfg.liveSyncDurationCount = 4;
@@ -540,17 +555,21 @@
         });
         hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
           liveRetries = 0;
-          // Automatic playback never climbs past 1080p; picking 1440p/2160p in
-          // the quality sheet lifts this cap explicitly.
+          // Live levels only become known once the manifest is parsed. Fill in
+          // the sheet here so the cogwheel can list and switch them, exactly
+          // like the official TV app.
+          if (live && hls.levels && hls.levels.length) {
+            curHeights = hlsHeights();
+          }
           var cap = autoCapIndex();
           if (live) {
-            // Start at 720p for a few seconds, then hand control to ABR. The
-            // old code pinned the best level (often 1080p) and only released
-            // it after 10 s; a TV whose Wi-Fi cannot sustain that stalls before
-            // the release. 720p is a safe first fragment on any TV, and ABR can
-            // still climb afterwards.
-            var start = levelIndexFor(720);
+            // Start at 1080p for four seconds, then hand control to ABR. The
+            // old code started at 720p, which left the first picture visibly
+            // soft on a 4K TV; a short pinned 1080p start still gives ABR a
+            // safe fragment while leaving room to climb to 1440p afterwards.
+            var start = levelIndexFor(1080);
             try { hls.autoLevelCapping = cap; } catch (e) {}
+            report('live-start', { start: start, cap: cap, n: hls.levels.length });
             if (start >= 0) {
               try { hls.startLevel = start; } catch (e) {}
               try { hls.currentLevel = start; } catch (e) {}
@@ -562,15 +581,26 @@
               }, 4000);
             }
           } else {
-            // cfg.startLevel already picked the cheapest rendition. Only an
-            // explicit viewer choice pins a level; otherwise ABR is free to
-            // climb as far as the link and decoder allow (up to 1080p).
+            // A viewer pick pins that level. Otherwise start at 720p for four
+            // seconds so the first picture is sharp, then hand control to ABR,
+            // which may climb all the way to 4K or step down if the link drops.
             try { hls.autoLevelCapping = cap; } catch (e) {}
             if (pinnedH) {
               var idx = levelIndexFor(pinnedH);
               if (idx >= 0) {
-                if (pinnedH > 1080) { try { hls.autoLevelCapping = -1; } catch (e) {} }
                 try { hls.currentLevel = idx; } catch (e) {}
+              }
+            } else {
+              var vstart = levelIndexFor(720);
+              if (vstart >= 0) {
+                try { hls.startLevel = vstart; } catch (e) {}
+                try { hls.currentLevel = vstart; } catch (e) {}
+                setTimeout(function () {
+                  if (!pinnedH) {
+                    try { hls.currentLevel = -1; } catch (e) {}
+                    try { hls.autoLevelCapping = cap; } catch (e) {}
+                  }
+                }, 4000);
               }
             }
             if (resumeAt > 1) {
@@ -663,12 +693,13 @@
     tiers = makeTiers(h);
     tier = 0;
     // The master playlist already carries every rendition, so switching is
-    // instant: no second resolve, no re-buffer, no restart.
-    if (hls && !isLive) {
+    // instant: no second resolve, no re-buffer, no restart. Live works the same
+    // way — hls.js switches at the next fragment.
+    if (hls) {
       var idx = levelIndexFor(h);
       if (idx >= 0) {
         try {
-          hls.autoLevelCapping = h > 1080 ? -1 : autoCapIndex();
+          hls.autoLevelCapping = autoCapIndex();
           hls.currentLevel = idx;
         } catch (e) {}
         closePanel();
@@ -742,6 +773,9 @@
     if (!curH && hls && hls.currentLevel >= 0) {
       curH = (hls.levels[hls.currentLevel] || {}).height || 0;
     }
+    // Automatic ABR keeps currentLevel at -1. Show the rendition actually on
+    // screen so the "current" marker is true for live and VOD alike.
+    if (!curH && v.videoHeight) curH = v.videoHeight;
     if (!curH) curH = tiers[tier].h;
     var html = '';
     for (var i = 0; i < hs.length; i++) {
@@ -766,7 +800,7 @@
         pinnedH = 0;
         tiers = makeTiers(720);
         tier = 0;
-        if (hls && !isLive) {
+        if (hls) {
           try {
             hls.autoLevelCapping = autoCapIndex();
             hls.currentLevel = -1;
@@ -790,7 +824,19 @@
   function renderQuality() {
     panelTitle.textContent = 'Quality';
     if (isLive) {
-      panelBody.innerHTML = '<div class="pnote">Livestream: quality follows the network automatically.</div>';
+      // The levels arrived with the manifest, so switching is instant; there is
+      // nothing to resolve. Only before MANIFEST_PARSED is there no list yet.
+      if (hls && hls.levels && hls.levels.length) {
+        curHeights = hlsHeights();
+      }
+      if (curHeights && curHeights.length) {
+        paintQuality(curHeights);
+        return;
+      }
+      panelBody.innerHTML = '<div class="pnote">Checking available formats…</div>';
+      setTimeout(function () {
+        if (panelKind === 'quality' && isLive) renderQuality();
+      }, 400);
       return;
     }
     // Fast path: /api/play already told us the resolutions, so there is nothing
@@ -1010,8 +1056,20 @@
       if (isLive) {
         if (now - lastMove > 12000) {
           lastMove = now;
-          report('live-stall', { rs: v.readyState, ns: v.networkState, t: t });
-          hint('Reconnecting live…', 5000);
+          report('live-stall', { rs: v.readyState, ns: v.networkState, t: t, pinned: pinnedH });
+          if (pinnedH) {
+            // A manually pinned live level that cannot keep up goes back to
+            // ABR instead of freezing the stream.
+            pinnedH = 0;
+            try { localStorage.removeItem('tubetv.h'); } catch (e) {}
+            try {
+              hls.autoLevelCapping = autoCapIndex();
+              hls.currentLevel = -1;
+            } catch (e) {}
+            hint('Live quality stalled — automatic', 5000);
+          } else {
+            hint('Reconnecting live…', 5000);
+          }
           try { hls.startLoad(); } catch (e) {}
           retryMuted();
         }

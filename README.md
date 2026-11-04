@@ -10,6 +10,8 @@ with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
 ## What you get
 
 - Your actual recommendation feed (logged in), not a "trending" page
+- The home feed hides **Shorts**, so the TV shows landscape videos instead of
+  portrait tiles with no title
 - Subscriptions and watch **history** feeds
 - Search
 - Endless scrolling: reaching the last row loads the next page automatically
@@ -66,24 +68,29 @@ Clicking/tapping the picture also play-pauses.
 
 VOD uses a single MSE pipeline: YouTube's H.264 **HLS video playlists** plus the
 matching **audio playlist** are fed to hls.js, which presents one `<video>` element.
-The server turns *every* H.264 rendition (360p–1080p) into one master playlist with a
-single audio group, so hls.js starts on the cheapest level — first picture appears
-quickly even on weak TV Wi-Fi — and ABR climbs or steps down as the link allows.
-Pinning one 1080p variant (the old behaviour) is what made playback stall every couple
-of seconds. The old split progressive path (a video element *and* a separate audio
-element, often with a 100 MB+ open-ended download) is what wedged VIDAA's media stack,
-so it is now only a fallback for videos with no HLS pair. Livestreams use the same
-single element; the first `yt-dlp` probe returns the `hls_variant` master directly, so
-a live channel starts from one resolve instead of two (and hls.js gets every level
-instead of one fixed variant). Live playback starts at 720p and releases to ABR after
-four seconds.
+The server turns *every* H.264 rendition (360p–1080p) and, when the TV supports VP9,
+the 1440p/2160p renditions into one master playlist with a single audio group. hls.js
+starts at 720p so the first picture is sharp, then releases to ABR after four seconds;
+ABR can climb all the way to 4K or step down as the link allows. Pinning one 1080p
+variant (the old behaviour) is what made playback stall every couple of seconds. The
+old split progressive path (a video element *and* a separate audio element, often with
+a 100 MB+ open-ended download) is what wedged VIDAA's media stack, so it is now only a
+fallback for videos with no HLS pair.
 
-**4K is opt-in.** YouTube only publishes 1440p/2160p as VP9, so the player first asks
-MediaSource whether it can decode `vp09`. If it can, `/api/play` adds those levels to
-the master and the Quality sheet lists `1440p` / `2160p (4K)`; if it cannot, they are
-never mentioned. Automatic playback is capped at 1080p either way — pick a higher level
-to lift the cap for that video. If an explicit 4K pick cannot keep up, the watchdog
-drops back to adaptive up to 1080p (`uhd-drop`) instead of abandoning HLS.
+Livestreams use the same single element; the first `yt-dlp` probe returns the
+`hls_variant` master directly, so a live channel starts from one resolve instead of two
+(and hls.js gets every level instead of one fixed variant). Live playback starts at
+1080p and releases to ABR after four seconds, so the first picture is already sharp.
+The **Quality** sheet works for livestreams too: it lists the levels from the live
+manifest and switches between them immediately, with **Automatic** returning control
+to ABR. A live pick that stalls is dropped back to automatic rather than freezing.
+
+**4K is automatic.** YouTube only publishes 1440p/2160p as VP9, so the player first
+asks MediaSource whether it can decode `vp09`. If it can, `/api/play` adds those levels
+to the master, the Quality sheet lists `1440p` / `2160p (4K)`, and ABR may climb to
+2160p on its own. If it cannot, those levels are never mentioned. A pinned 4K that
+cannot keep up is dropped back to adaptive up to 1080p (`uhd-drop`) instead of
+abandoning HLS.
 
 Tiles are prefetched 300 ms after the remote stops on them, and the prefetch shares
 the same in-flight `yt-dlp` run as the play request. Resolves are also serialized:
@@ -256,7 +263,7 @@ copies bytes — so CPU stays flat:
 | RAM | 100–135 MB | same |
 
 Resolution is the one slow step: `yt-dlp` normally runs YouTube's player JavaScript
-before it can list formats. Build `2026-11-04.1` skips that for the HLS path
+before it can list formats. Build `2026-11-04.3` skips that for the HLS path
 (`YTDLP_JS_RUNTIME=none`): the HLS playlists this app uses do not carry YouTube's `n`
 throttle parameter, and yt-dlp returns all of them in 1–5 s without a solver. The
 previous Node/V8 solver needed >100 MB per solve; on a 4 GB Pi it could fall into swap

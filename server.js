@@ -23,7 +23,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-04.1';
+const BUILD = '2026-11-04.3';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -987,7 +987,9 @@ async function handle(req, res) {
     const browseId = { home: 'FEwhat_to_watch', subs: 'FEsubscriptions', history: 'FEhistory' }[kind];
     if (!browseId && kind !== 'search') return json(res, 400, { error: 'bad kind' });
     const fetchPage = (tok) =>
-      kind === 'search' ? yt.searchPage(null, tok) : yt.browsePage(browseId, tok);
+      kind === 'search'
+        ? yt.searchPage(null, tok)
+        : yt.browsePage(browseId, tok, { skipShorts: kind === 'home' });
 
     let page = { videos: [], token: null };
     try {
