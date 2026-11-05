@@ -42,3 +42,287 @@ TubeTV running
 2026-11-04 04:13:51 client player hls-error id=aqz-KE-bpKQ {"type":"mediaError","details":"bufferAppendingError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
 2026-11-04 04:13:52 client player playing id=aqz-KE-bpKQ {"tier":0,"muted":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
 2026-11-04 04:13:52 client player hls-error id=aqz-KE-bpKQ {"type":"mediaError","details":"bufferAppendingError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 04:21:11 client player hls-error id=aqz-KE-bpKQ {"type":"mediaError","details":"bufferStalledError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 04:38:44 hls ERR /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM TypeError
+2026-11-04 04:38:45 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 04:55:07 client player hls-error id=aqz-KE-bpKQ {"type":"mediaError","details":"bufferNudgeOnStall","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 08:52:13 hls ERR /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM AbortError
+2026-11-04 08:52:14 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 08:52:16 client player hls-error id=4xDzrJKXOOY {"type":"otherError","details":"internalException","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:21:44 hls ERR /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ TypeError
+2026-11-04 09:37:35 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:37:35 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:37:36 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:37:36 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:37:36 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:37:37 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:37:37 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:37:37 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:37:37 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:37:37 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:37 hls ERR /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM AbortError
+2026-11-04 09:50:39 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:40 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:40 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:40 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:40 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:50:40 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:40 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:40 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:50:40 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:41 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:50:42 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:42 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:50:42 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:50:42 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:43 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:50:43 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:50:43 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:45 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:50:45 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:50:45 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:45 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:50:45 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:45 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:45 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:45 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:45 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:45 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:46 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:50:47 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:48 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:50:48 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:50 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:50:50 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:50:50 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:51 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:50:53 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:50:53 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:54 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:54 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:54 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:54 client player live-retry id=4xDzrJKXOOY {"details":"levelLoadError","n":1} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:54 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"audioTrackLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:54 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:54 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:54 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:54 client player live-retry id=4xDzrJKXOOY {"details":"levelLoadError","n":1} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:56 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:56 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:56 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"audioTrackLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:50:56 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:50:56 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 09:50:56 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:17 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:51:18 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:51:18 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"audioTrackLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:19 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 09:51:19 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:19 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:51:19 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 09:51:19 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:19 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:51:19 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:51:19 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:19 client player live-retry id=4xDzrJKXOOY {"details":"levelLoadError","n":1} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:19 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:51:19 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"audioTrackLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:20 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 09:51:20 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:20 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:51:20 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 09:51:20 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:20 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:51:20 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:51:21 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:51:21 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:51:21 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"levelLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:21 client player live-retry id=4xDzrJKXOOY {"details":"levelLoadError","n":1} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:23 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 09:51:23 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 09:51:23 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:23 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:23 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:51:23 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:51:24 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:51:25 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:51:26 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 09:51:26 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:33 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:51:34 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:51:37 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:51:37 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"audioTrackLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:39 hls 403 /api/manifest/hls_playlist/expire/1793784997/ei/RajqarSDJLyM
+2026-11-04 09:51:39 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"audioTrackLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:42 hls 403 /api/manifest/hls_playlist/expire/1793785347/ei/o6nqao3cJ73H
+2026-11-04 09:51:42 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"audioTrackLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:51:43 hls 403 /api/manifest/hls_playlist/expire/1793785062/ei/hqjqavHaBujJ
+2026-11-04 09:51:43 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"audioTrackLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:52:33 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 09:52:33 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 09:52:33 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 09:52:33 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:52:33 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 09:52:33 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 10:53:02 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 10:53:02 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 10:53:02 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 10:53:02 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 10:53:02 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 10:53:02 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:14:59 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:14:59 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:14:59 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:14:59 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:14:59 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:14:59 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:16:59 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:16:59 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:16:59 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:16:59 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:16:59 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:16:59 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:36 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:34:36 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:34:36 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:34:36 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:36 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:36 client player live-retry id=4xDzrJKXOOY {"details":"fragLoadError","n":2} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:36 client player live-retry id=4xDzrJKXOOY {"details":"fragLoadError","n":2} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:36 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:36 client player live-retry id=4xDzrJKXOOY {"details":"fragLoadError","n":2} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:37 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:34:37 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:34:37 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:34:37 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:37 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:37 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:40 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:34:40 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:34:40 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:40 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:34:40 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:34:40 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:36:36 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:36:36 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:36:36 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:36:36 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:36:36 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:36:36 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:54:32 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:54:32 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:54:32 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 11:54:32 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:54:32 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 11:54:32 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:00:23 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:00:23 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:00:23 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:00:23 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:00:23 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:00:23 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:20:06 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:20:06 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:20:06 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:20:06 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:20:06 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:20:06 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:06 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:22:06 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:22:06 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:22:06 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:06 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:06 client player live-retry id=4xDzrJKXOOY {"details":"fragLoadError","n":3} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:06 client player live-retry id=4xDzrJKXOOY {"details":"fragLoadError","n":3} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:06 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:06 client player live-retry id=4xDzrJKXOOY {"details":"fragLoadError","n":3} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:07 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:22:07 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:07 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:22:07 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:22:07 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:07 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:10 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:22:10 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:22:10 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:22:10 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:10 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:22:10 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:24:06 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:24:06 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:24:06 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:24:06 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:24:06 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:24:06 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:34:53 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:34:53 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:34:53 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:34:53 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:34:53 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:34:53 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:53:05 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:53:05 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:53:05 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 12:53:05 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:53:05 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 12:53:05 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:10:29 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:10:29 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:10:29 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:10:29 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:10:29 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:10:29 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:33 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:28:33 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:28:33 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:33 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:33 client player live-retry id=4xDzrJKXOOY {"details":"fragLoadError","n":4} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:33 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:28:33 client player live-retry id=4xDzrJKXOOY {"details":"fragLoadError","n":4} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:33 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:33 client player live-retry id=4xDzrJKXOOY {"details":"fragLoadError","n":4} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:34 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:28:34 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:28:34 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:28:34 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:34 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:34 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:37 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:28:37 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:28:37 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:37 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:28:37 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:28:37 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:57:17 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:57:17 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:57:17 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 13:57:17 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:57:17 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 13:57:17 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:15:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:15:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:15:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:15:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:15:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:15:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:17:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:17:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:17:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:17:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:17:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:17:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:19:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:19:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:19:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:19:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:19:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:19:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":false} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:21:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:21:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:21:15 hls 403 /videoplayback/id/4xDzrJKXOOY.7/itag/233/source/yt_live_broa
+2026-11-04 14:21:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:21:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:21:15 client player hls-error id=4xDzrJKXOOY {"type":"networkError","details":"fragLoadError","fatal":true} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:21:15 client player error id=4xDzrJKXOOY {"msg":"Live stream failed: fragLoadError","tier":0,"rs":4,"ns":2,"code":0,"acode":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:21:15 client player error id=4xDzrJKXOOY {"msg":"Live stream failed: fragLoadError","tier":0,"rs":4,"ns":2,"code":0,"acode":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea
+2026-11-04 14:21:15 client player error id=4xDzrJKXOOY {"msg":"Live stream failed: fragLoadError","tier":0,"rs":4,"ns":2,"code":0,"acode":0} | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Hea

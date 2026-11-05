@@ -3,7 +3,14 @@ import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
+import { setDefaultResultOrder } from 'node:dns';
 import { Readable } from 'node:stream';
+
+// yt-dlp runs with --force-ipv4 because home networks often advertise IPv6
+// without a working route. Node's fetch would otherwise try AAAA first for
+// every YouTube/InnerTube request (including the direct player fast path) and
+// wait for the connect timeout before falling back.
+setDefaultResultOrder('ipv4first');
 
 import * as auth from './lib/auth.js';
 import * as yt from './lib/innertube.js';
@@ -23,7 +30,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-04.3';
+const BUILD = '2026-11-04.4';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -659,6 +666,35 @@ async function handle(req, res) {
     return json(res, 200, out);
   }
 
+  // --- direct player probe ------------------------------------------------
+  // /diag/fast?id=<video> tests the signed-in InnerTube TV player fast path
+  // without falling back to yt-dlp. Useful for confirming whether the Pi can
+  // skip Python on future builds.
+  if (path === '/diag/fast') {
+    const rid = url.searchParams.get('id') || '';
+    if (!/^[A-Za-z0-9_-]{11}$/.test(rid)) return json(res, 400, { error: 'bad video id' });
+    const t = Date.now();
+    try {
+      const p = await yt.playerHls(rid);
+      return json(res, 200, {
+        ok: true,
+        ms: Date.now() - t,
+        signedIn: yt.signedIn(),
+        live: p.live,
+        title: (p.title || '').slice(0, 80),
+        duration: p.duration,
+        hlsHost: (() => { try { return new URL(p.hls).host; } catch { return '?'; } })(),
+      });
+    } catch (e) {
+      return json(res, 200, {
+        ok: false,
+        ms: Date.now() - t,
+        signedIn: yt.signedIn(),
+        error: String(e.message || e).slice(0, 200),
+      });
+    }
+  }
+
   // Test-only proxy so /diag can check whether the proxy path itself works.
   if (path === '/api/probe') {
     const u = url.searchParams.get('u') || '';
@@ -757,7 +793,15 @@ async function handle(req, res) {
           tbr: entry.tbr,
           playlist: entry.videoPlaylist,
         }];
-    const list = all.filter((v) => entry.allowVp9 || v.codec !== 'vp9');
+    // One codec family per master. hls.js 0.14 uses a single MSE SourceBuffer,
+    // so an ABR switch from H.264 to VP9 throws bufferAppendingError, flushes
+    // the buffer and black-screens the TV. VP9-capable players get a VP9-only
+    // master (1440/2160), everyone else an H.264 master (≤1080); the player can
+    // fall back from one to the other with a normal reload.
+    const family = entry.codec || 'avc';
+    let list = all.filter((v) => (v.codec || 'avc') === family);
+    if (!list.length) list = all.filter((v) => (v.codec || 'avc') === 'avc');
+    if (!list.length) list = all;
     const lines = [
       '#EXTM3U',
       '#EXT-X-VERSION:3',
@@ -854,13 +898,17 @@ async function handle(req, res) {
           });
         }
         if (prefetch) return json(res, 200, { ok: true, mode: 'mse', height: info.height });
-        const tok = makeHlsToken({ ...info, allowVp9: vp9 });
-        const levels = (info.variants || []).filter((v) => vp9 || v.codec !== 'vp9');
+        // A VP9 television gets the 1440/2160 master; everything else stays on
+        // H.264 ≤1080. Mixing both in one master is what broke ABR.
+        const codec =
+          vp9 && (info.variants || []).some((v) => v.codec === 'vp9') ? 'vp9' : 'avc';
+        const levels = (info.variants || []).filter((v) => v.codec === codec);
+        const tok = makeHlsToken({ ...info, codec });
         log(
           'play hls',
           id,
           `${info.height}p`,
-          `${levels.length || 1}lv${vp9 ? '+vp9' : ''}`,
+          `${levels.length || 1}lv ${codec}`,
           info.vcodec,
           info.acodec,
           ua(req)
@@ -873,7 +921,7 @@ async function handle(req, res) {
           width: info.width,
           vcodec: info.vcodec,
           acodec: info.acodec,
-          heights: (info.heights || []).filter((hh) => vp9 || hh <= 1080),
+          heights: [...new Set(levels.map((v) => v.height))].sort((a, b) => b - a),
           mode: 'mse',
         });
       } catch (e) {
@@ -982,14 +1030,48 @@ async function handle(req, res) {
   if (path === '/api/more') {
     const kind = url.searchParams.get('kind') || 'home';
     let token = url.searchParams.get('token') || '';
-    if (!token) return json(res, 400, { error: 'missing token' });
+    const refresh = url.searchParams.get('refresh') === '1';
+    if (!token && !refresh) return json(res, 400, { error: 'missing token' });
 
     const browseId = { home: 'FEwhat_to_watch', subs: 'FEsubscriptions', history: 'FEhistory' }[kind];
     if (!browseId && kind !== 'search') return json(res, 400, { error: 'bad kind' });
+    if (refresh && kind === 'search') return json(res, 400, { error: 'cannot refresh search' });
     const fetchPage = (tok) =>
       kind === 'search'
         ? yt.searchPage(null, tok)
         : yt.browsePage(browseId, tok, { skipShorts: kind === 'home' });
+
+    // A TV keeps the grid open for hours; YouTube's page-tail continuation
+    // token eventually goes stale. Fetch a fresh first page and return the
+    // page *after* it, so the viewer keeps scrolling instead of hitting a
+    // dead end. Search needs its query, which continuation requests do not
+    // carry, so only the browse feeds can recover this way.
+    const freshNext = async () => {
+      const first = await yt.browsePage(browseId, null, {
+        skipShorts: kind === 'home',
+      });
+      if (!first.token) return null;
+      const next = await fetchPage(first.token);
+      log('more refresh', kind, `${next.videos.length}v`);
+      return next;
+    };
+
+    if (refresh) {
+      try {
+        const next = await freshNext();
+        return json(res, 200, {
+          html: next ? next.videos.map(card).join('') : '',
+          token: (next && next.token) || null,
+          n: next ? next.videos.length : 0,
+          refreshed: true,
+        });
+      } catch (e) {
+        const msg = String(e.message || e);
+        if (/401|authentication/i.test(msg)) return json(res, 401, { error: 'signin' });
+        log('more refresh ERR', kind, msg.slice(0, 120));
+        return json(res, 502, { error: 'feed unavailable' });
+      }
+    }
 
     let page = { videos: [], token: null };
     try {
@@ -1004,6 +1086,21 @@ async function handle(req, res) {
       const msg = String(e.message || e);
       if (/401|authentication/i.test(msg)) return json(res, 401, { error: 'signin' });
       log('more ERR', kind, msg.slice(0, 120));
+      if (kind !== 'search') {
+        try {
+          const next = await freshNext();
+          if (next) {
+            return json(res, 200, {
+              html: next.videos.map(card).join(''),
+              token: next.token || null,
+              n: next.videos.length,
+              refreshed: true,
+            });
+          }
+        } catch (e2) {
+          log('more refresh ERR', kind, String(e2.message || e2).slice(0, 100));
+        }
+      }
       return json(res, 502, { error: 'feed unavailable' });
     }
 

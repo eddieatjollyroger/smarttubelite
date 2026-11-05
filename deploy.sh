@@ -24,6 +24,10 @@ rsync -av --delete \
   --exclude 'node_modules/' \
   --exclude '.DS_Store' \
   --exclude '*.log' \
+  --exclude '*.part' \
+  --exclude '*.ytdl' \
+  --exclude '*.mp4' \
+  --exclude '*.webm' \
   "$SRC/" "$TARGET:$DEST/"
 
 echo "==> rebuilding container (this can take a few minutes on the Pi)"
@@ -37,8 +41,8 @@ while [ "$i" -lt 20 ]; do
   if out=$(curl -fsS --max-time 5 "http://$HOST:8484/healthz" 2>/dev/null); then
     echo "$out"
     case "$out" in
-      *'"build":"2026-11-04.3"'*) echo "==> deployed"; exit 0 ;;
-      *) echo "!! health responded but the build is not 2026-11-04.3" >&2; exit 1 ;;
+      *'"build":"2026-11-04.4"'*) echo "==> deployed"; exit 0 ;;
+      *) echo "!! health responded but the build is not 2026-11-04.4" >&2; exit 1 ;;
     esac
   fi
 done

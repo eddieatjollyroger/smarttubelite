@@ -14,8 +14,11 @@ with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
   portrait tiles with no title
 - Subscriptions and watch **history** feeds
 - Search
-- Endless scrolling: reaching the last row loads the next page automatically
-- H.264/AAC playback forced, so old TV browsers can decode it
+- Endless scrolling: reaching the last row loads the next page automatically, and a
+  continuation token that has gone stale on a long-open TV session is refreshed
+  server-side instead of ending the grid
+- H.264/AAC by default; VP9 1440p/2160p when the TV supports it, so old browsers
+  still get a compatible stream
 - Videos go fullscreen and start **on their own**, muted first (no key needed), then
   the player turns sound on by itself where the browser allows it
 - Bottom control bar with play/pause, a **Quality** menu listing the resolutions this
@@ -66,41 +69,48 @@ no re-resolve and no restart. **Automatic** clears the pin and hands quality bac
 hls.js.
 Clicking/tapping the picture also play-pauses.
 
-VOD uses a single MSE pipeline: YouTube's H.264 **HLS video playlists** plus the
-matching **audio playlist** are fed to hls.js, which presents one `<video>` element.
-The server turns *every* H.264 rendition (360p–1080p) and, when the TV supports VP9,
-the 1440p/2160p renditions into one master playlist with a single audio group. hls.js
-starts at 720p so the first picture is sharp, then releases to ABR after four seconds;
-ABR can climb all the way to 4K or step down as the link allows. Pinning one 1080p
-variant (the old behaviour) is what made playback stall every couple of seconds. The
-old split progressive path (a video element *and* a separate audio element, often with
-a 100 MB+ open-ended download) is what wedged VIDAA's media stack, so it is now only a
-fallback for videos with no HLS pair.
+VOD uses a single MSE pipeline: YouTube's HLS video playlists plus the matching
+audio playlist are fed to hls.js, which presents one `<video>` element. The server
+builds a master with **exactly one codec family**. A VP9-capable TV gets the
+1440p/2160p VP9 renditions; every other browser gets H.264 360p–1080p. hls.js 0.14
+uses a single MSE `SourceBuffer`, so mixing `avc1` and `vp09` in one master made an
+ABR switch throw `bufferAppendingError`, flush the buffer and black-screen the TV.
+Keeping one family means hls.js starts on the best level of that family and ABR moves
+within it at fragment boundaries. If VP9 playback fails, the player reloads the H.264
+master (≤1080p) at the same position before giving up on MSE. The old split
+progressive path (a video element *and* a separate audio element, often with a 100 MB+
+open-ended download) is only a fallback for videos with no HLS pair.
 
 Livestreams use the same single element; the first `yt-dlp` probe returns the
 `hls_variant` master directly, so a live channel starts from one resolve instead of two
 (and hls.js gets every level instead of one fixed variant). Live playback starts at
 1080p and releases to ABR after four seconds, so the first picture is already sharp.
-The **Quality** sheet works for livestreams too: it lists the levels from the live
-manifest and switches between them immediately, with **Automatic** returning control
-to ABR. A live pick that stalls is dropped back to automatic rather than freezing.
+Live HLS from YouTube tops out at **1080p**, even for channels that advertise 4K, because
+the HLS formats yt-dlp receives for those streams only expose AVC ≤1080p. The **Quality**
+sheet works for livestreams too: it lists the levels from the live manifest and switches
+between them immediately, with **Automatic** returning control to ABR. A live pick that
+stalls is dropped back to automatic rather than freezing.
 
-**4K is automatic.** YouTube only publishes 1440p/2160p as VP9, so the player first
-asks MediaSource whether it can decode `vp09`. If it can, `/api/play` adds those levels
-to the master, the Quality sheet lists `1440p` / `2160p (4K)`, and ABR may climb to
-2160p on its own. If it cannot, those levels are never mentioned. A pinned 4K that
-cannot keep up is dropped back to adaptive up to 1080p (`uhd-drop`) instead of
-abandoning HLS.
+**4K is automatic.** YouTube publishes 1440p/2160p only as VP9, so the player asks
+MediaSource whether it can decode `vp09`. If it can, `/api/play` builds a VP9-only
+master and hls.js starts on 2160p; when the link cannot sustain it, ABR drops to 1440p
+within the same codec (no buffer flush and no black screen) and climbs back later. If
+the TV cannot decode VP9, the master is H.264-only and the Quality sheet stops at
+1080p. A VP9 failure reloads the H.264 master at the same position instead of dropping
+straight to the split path.
 
-Tiles are prefetched 300 ms after the remote stops on them, and the prefetch shares
-the same in-flight `yt-dlp` run as the play request. Resolves are also serialized:
-only one yt-dlp (and one challenge solver) runs at a time, and pressing play cancels
-a running prefetch. Before that, three concurrent resolves on the Pi took the load
-average to 35 and made every one of them slower. Chromium allows unmuted playback for
-the rest of the page after any key press (`hasBeenActive`), which outlives the ~5 s
-`isActive` window, so playback starts **unmuted** even when the resolve is slow. If
-sound is genuinely refused, it starts muted (always allowed) and one OK press turns
-the sound on.
+The first tile starts prefetching as soon as the grid exists (not on window `load`,
+which waits for every thumbnail), and a tile is prefetched 300 ms after the remote
+stops on it. The prefetch shares the same in-flight `yt-dlp` run as the play request,
+so OK does not pay for a second resolve. A play request cancels prefetches for *other*
+tiles but never the one already resolving for the tile being opened, so a cold start
+does not throw away a nearly-finished resolve. Resolves are serialized: only one
+yt-dlp (and one challenge solver) runs at a time. Before that, three concurrent
+resolves on the Pi took the load average to 35 and made every one of them slower.
+Chromium allows unmuted playback for the rest of the page after any key press
+(`hasBeenActive`), which outlives the ~5 s `isActive` window, so playback starts
+**unmuted** even when the resolve is slow. If sound is genuinely refused, it starts
+muted (always allowed) and one OK press turns the sound on.
 
 Grid thumbnails are proxied by the Pi (`/api/thumb`) instead of loading from
 `i.ytimg.com`. VIDAA's browser proved unreliable at third-party images and blanked
@@ -263,11 +273,14 @@ copies bytes — so CPU stays flat:
 | RAM | 100–135 MB | same |
 
 Resolution is the one slow step: `yt-dlp` normally runs YouTube's player JavaScript
-before it can list formats. Build `2026-11-04.3` skips that for the HLS path
+before it can list formats. Build `2026-11-04.4` skips that for the HLS path
 (`YTDLP_JS_RUNTIME=none`): the HLS playlists this app uses do not carry YouTube's `n`
 throttle parameter, and yt-dlp returns all of them in 1–5 s without a solver. The
 previous Node/V8 solver needed >100 MB per solve; on a 4 GB Pi it could fall into swap
 and hang past the resolve deadline, which is exactly what made VOD starts time out.
+The server also prefers IPv4 for its own YouTube/InnerTube requests (matching
+`yt-dlp --force-ipv4`), so a broken IPv6 route does not add a connect timeout to every
+lookup.
 
 If a video exposes no HLS video+audio pair, the server retries once with **QuickJS**
 (`YTDLP_JS_FALLBACK=quickjs`) — a small single-threaded C runtime that writes the
@@ -280,8 +293,9 @@ want the fallbacks to work there too, put `qjs` on `PATH` or set
 `YTDLP_JS_FALLBACK=quickjs:/path/to/qjs`. A missing solver is ignored by yt-dlp, so
 nothing breaks without it.
 
-Every resolve is serialized (one yt-dlp at a time) and a play request cancels a
-running prefetch. A timeout is final: the server does not fall through to a second
+Every resolve is serialized (one yt-dlp at a time) and a play request cancels
+prefetches for other videos but shares the one already running for the video being
+opened. A timeout is final: the server does not fall through to a second
 resolver, which previously doubled a failed start. The default deadline is 45 s
 (`YTDLP_TIMEOUT_MS`); a timeout is logged with whether the whole process group was
 killed. Leftover Node/QJS children were what kept the Pi load average high.
@@ -303,6 +317,12 @@ A slow `dns6` with a fast `dns4` is a broken IPv6 route (yt-dlp runs with
 `--force-ipv4` for exactly that reason); a slow `resolve` with fast `dns4`/`http`
 means yt-dlp itself is the bottleneck, not the network.
 
+`http://<host>:8484/diag/fast?id=<videoId>` probes the optional direct InnerTube TV
+player path in isolation. It returns the elapsed time and HLS host on success, or the
+exact error when YouTube does not hand back an HLS manifest. The normal resolver tries
+this first (mostly useful for live, where a manifest is always present) and silently
+falls back to yt-dlp, so a failed probe costs one quick request, not a playback failure.
+
 The real limit is bandwidth: traffic passes through the box twice (Google → host →
 TV), so budget ~2× the video bitrate. Gigabit ethernet is plenty.
 
@@ -322,12 +342,14 @@ TV), so budget ~2× the video bitrate. Gigabit ethernet is plenty.
   while the feeds use the TV one.
 - No Shorts, no channel pages, no casting.
 - Unofficial: uses InnerTube and a public OAuth client. Google can change either at any time.
-- Automatic quality tops out at **1080p H.264**. YouTube serves 1440p/2160p only as
-  VP9; they appear in the Quality sheet (and are allowed by ABR) only when the TV's
-  `MediaSource` reports `vp09` support, and only after you pick one explicitly.
-  VIDAA browsers that lack VP9 simply never see those entries.
-- 1080p is H.264 *High* profile; many TV decoders only do *Main*. That is why the
-  player steps down to 720p, which YouTube serves as Main profile (`avc1.4D401F`).
+- Automatic quality reaches **2160p** when the TV's `MediaSource` reports `vp09`
+  support; otherwise it tops out at 1080p H.264. 1440p/2160p are VP9 only. If VP9
+  playback fails, the player reloads the H.264 HLS master (≤1080p) at the same position.
+- 1080p is H.264 *High* profile; many TV decoders only do *Main*. If the 1080p level
+  fails, the watchdog steps down to 720p, which YouTube serves as Main profile
+  (`avc1.4D401F`).
+- **Live HLS is 1080p at most.** Even 4K live channels expose only AVC HLS ≤1080p to
+  yt-dlp, so the Quality sheet cannot offer more than 1080p for a livestream.
 - Audio and video are separate HLS streams muxed by hls.js into one `<video>`; the
   split element pair is only a fallback for videos with no HLS rendition.
 - Livestreams need `MediaSource` in the TV browser (hls.js). Old VIDAA builds without it

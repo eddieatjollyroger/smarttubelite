@@ -60,6 +60,7 @@
   var audioRetries = 0;
   var audioGaveUp = false;
   var forceFresh = false;
+  var forceAvc = false;
   var lastAnchor = null;
   var pushed = false;
   var lastScroll = 0;
@@ -147,18 +148,25 @@
     return best;
   }
 
-  // Highest level at or below a height, for a staged climb. Keeping ABR under a
-  // 1080p cap for the first seconds avoids the jump straight from the 720p
-  // start to a 4K fragment, which can drain the buffer and black the screen.
-  function capAt(h) {
+  // Lowest level in the current master. The master only carries one codec
+  // family now, so this is the safe floor to hold briefly after a 4K stall.
+  function lowestCap() {
     if (!hls || !hls.levels) return -1;
     var best = -1;
     var bestH = 0;
     for (var i = 0; i < hls.levels.length; i++) {
       var lh = hls.levels[i].height || 0;
-      if (lh > 0 && lh <= h && lh >= bestH) { bestH = lh; best = i; }
+      if (lh > 0 && (best < 0 || lh < bestH)) { bestH = lh; best = i; }
     }
     return best;
+  }
+
+  function isVp9Stream() {
+    if (!hls || !hls.levels) return false;
+    for (var i = 0; i < hls.levels.length; i++) {
+      if (/^vp0?9/i.test(String(hls.levels[i].videoCodec || ''))) return true;
+    }
+    return false;
   }
 
   function clearRamp() {
@@ -178,27 +186,16 @@
     try { hls.loadLevel = -1; } catch (e) {}
   }
 
-  // Let ABR climb one tier at a time after a safe start or a 4K stall. Raising
-  // the cap instead of forcing a level keeps the switch at a fragment boundary,
-  // and each step adds only a modest bitrate jump.
-  function rampUp(firstCap, fullCap) {
+  // Hold ABR at a safe level briefly after a stall, then let it use the whole
+  // current master again. Raising the cap keeps switches at fragment
+  // boundaries; the master has one codec family, so there is no codec change.
+  function rampUp(fullCap) {
     clearRamp();
-    var cap1440 = capAt(1440);
     rampTimer = setTimeout(function () {
       rampTimer = null;
       if (pinnedH || !hls || isLive || v.ended) return;
-      if (cap1440 > firstCap) {
-        try { hls.autoLevelCapping = cap1440; } catch (e) {}
-        report('abr-step', { h: 1440 });
-        rampTimer = setTimeout(function () {
-          rampTimer = null;
-          if (pinnedH || !hls || isLive || v.ended) return;
-          try { hls.autoLevelCapping = fullCap; } catch (e) {}
-          report('abr-step', { h: (hls.levels[fullCap] || {}).height || 0 });
-        }, 8000);
-      } else {
-        try { hls.autoLevelCapping = fullCap; } catch (e) {}
-      }
+      try { hls.autoLevelCapping = fullCap; } catch (e) {}
+      report('abr-step', { h: (hls.levels[fullCap] || {}).height || 0 });
     }, 8000);
   }
 
@@ -511,8 +508,25 @@
 
     function fallback(why) {
       if (live) return;
-      hlsOff = true;
       resumeAt = lastTime || v.currentTime || 0;
+      // A VP9 master that keeps failing should fall back to H.264 HLS (≤1080)
+      // before abandoning MSE entirely. That keeps the quality sheet and
+      // seeking, and is much better than the progressive split path.
+      if (supportsVp9 && !forceAvc && isVp9Stream()) {
+        forceAvc = true;
+        hlsFatalRetries = 0;
+        hlsFatalBusy = false;
+        hlsOff = false;
+        pinnedH = 0;
+        try { localStorage.removeItem('tubetv.h'); } catch (e) {}
+        report('hls-avc-fallback', { why: why, at: resumeAt });
+        loadSeq++;
+        teardown();
+        userPaused = false;
+        load();
+        return;
+      }
+      hlsOff = true;
       report('hls-fallback', { why: why, at: resumeAt });
       loadSeq++;
       teardown();
@@ -697,7 +711,7 @@
     var q = '/api/play?id=' + encodeURIComponent(id) +
       (t.muxed ? '&muxed=1' : '&h=' + (t.h || 720)) +
       (useHls ? '&hls=1' : '') +
-      (useHls && supportsVp9 ? '&vp9=1' : '') +
+      (useHls && supportsVp9 && !forceAvc ? '&vp9=1' : '') +
       (forceFresh ? '&fresh=1' : '');
     forceFresh = false;
     report('request', { tier: tier, q: q });
@@ -1058,8 +1072,20 @@
     if (tier >= tiers.length - 1) return false;
     tier++;
     // A frozen MSE pipeline is not going to improve by re-resolving the same
-    // HLS master; drop to the split/progressive path at the next tier.
-    if (why === 'frozen' && hls) hlsOff = true;
+    // HLS master. On a VP9 stream prefer the H.264 HLS master (≤1080) before
+    // dropping all the way to the progressive split path; otherwise fall back
+    // to split at the next tier.
+    if (hls) {
+      if (supportsVp9 && !forceAvc && isVp9Stream()) {
+        forceAvc = true;
+        hlsFatalRetries = 0;
+        pinnedH = 0;
+        try { localStorage.removeItem('tubetv.h'); } catch (e) {}
+        report('step-avc', { why: why, tier: tier });
+      } else if (why === 'frozen') {
+        hlsOff = true;
+      }
+    }
     // A frozen stream is the strongest signal that this TV's decoder (or its
     // video-only pipeline) cannot handle the format, so remember the tier.
     if (why === 'frozen' || why === 'stalled' || /^(video|audio)-[34]$/.test(why)) {
@@ -1146,19 +1172,19 @@
       }
 
       if (idle < limit) return;
-      // A 4K picture that cannot keep up (pinned or chosen by ABR) drops to
-      // 1080p and climbs back gradually, instead of tearing down HLS.
+      // A 4K picture that cannot keep up (pinned or chosen by ABR) drops to the
+      // lowest level in the same codec master and climbs back gradually,
+      // instead of tearing down HLS or crossing into another codec.
       if (hls && !isLive) {
         var lh = pinnedH || v.videoHeight || 0;
-        if (lh > 1080) {
-          report('uhd-drop', { from: lh, pinned: !!pinnedH, rs: v.readyState });
+        var floor = lowestCap();
+        if (lh > 1080 && floor >= 0 && floor !== autoCapIndex()) {
+          report('uhd-drop', { from: lh, pinned: !!pinnedH, rs: v.readyState, floor: hls.levels[floor].height });
           pinnedH = 0;
           try { localStorage.removeItem('tubetv.h'); } catch (e) {}
-          var lowCap = capAt(1080);
-          if (lowCap < 0) lowCap = autoCapIndex();
-          releaseAuto(lowCap);
-          rampUp(lowCap, autoCapIndex());
-          hint('4K stalled — back to 1080p', 6000);
+          releaseAuto(floor);
+          rampUp(autoCapIndex());
+          hint('Playback stalled — adapting quality', 6000);
           lastT = -1;
           lastMove = Date.now();
           warned = false;
@@ -1306,6 +1332,7 @@
     audioRetries = 0;
     audioGaveUp = false;
     forceFresh = false;
+    forceAvc = false;
     hlsOff = false;
     hlsFatalRetries = 0;
     hlsFatalBusy = false;
@@ -1536,13 +1563,22 @@
       if (m) schedulePrefetch(m[1]);
     }, true);
 
-    window.addEventListener('load', function () {
+    // Start warming the first tile as soon as the grid exists. The old code
+    // waited for window `load`, which on the TV could be many seconds late
+    // because it also waits for every thumbnail; the remote is usually already
+    // sitting on the first card by then.
+    function warmFirst() {
       if (active) return;
       var first = document.querySelector('.card');
       if (!first) return;
       var m = /^\/watch\?(?:.*&)?id=([A-Za-z0-9_-]{11})/.exec(first.getAttribute('href') || '');
-      if (m) setTimeout(function () { if (!active) prefetch(m[1]); }, 250);
-    });
+      if (m) setTimeout(function () { if (!active) prefetch(m[1]); }, 150);
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', warmFirst);
+    } else {
+      setTimeout(warmFirst, 0);
+    }
 
     document.addEventListener('click', function (e) {
       if (active) return;
