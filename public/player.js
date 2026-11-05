@@ -1083,7 +1083,13 @@
         try { localStorage.removeItem('tubetv.h'); } catch (e) {}
         report('step-avc', { why: why, tier: tier });
       } else if (why === 'frozen') {
-        hlsOff = true;
+        // A slow first frame on a loaded Pi is not proof that MSE is broken.
+        // Stay on HLS while a lower HLS tier remains; only the final muxed
+        // tier (or a decoder error) should send playback to the split path.
+        // Jumping straight to split here cost a second 10-20 s resolve and was
+        // the "playback error, trying a compatible format" moment on the TV.
+        var next = tiers[tier];
+        if (!next || next.muxed) hlsOff = true;
       }
     }
     // A frozen stream is the strongest signal that this TV's decoder (or its
@@ -1108,7 +1114,11 @@
   // So the watchdog watches *progress*, not readiness.
   function startWatchdog() {
     stopWatchdog();
-    var lastT = -1;
+    // Start from the real clock, not -1: with -1 the first sample (t=0 while
+    // the first segment is still being buffered) looked like progress, so a
+    // slow start could be misread as a freeze and step down to the split path.
+    var lastT = v.currentTime || 0;
+    var progressed = false;
     var lastMove = Date.now();
     var warned = false;
 
@@ -1132,9 +1142,17 @@
 
       var now = Date.now();
       var t = v.currentTime || 0;
+      if (t < lastT - 1) {
+        // A backwards seek is not a stall; re-baseline instead.
+        lastT = t;
+        lastMove = now;
+        warned = false;
+        return;
+      }
       if (t > lastT + 0.05) {
         lastT = t;
         lastMove = now;
+        progressed = true;
         warned = false;
         return;
       }
@@ -1162,8 +1180,10 @@
       }
 
       var idle = now - lastMove;
-      // Not enough data yet is a network problem: give it longer.
-      var limit = v.readyState >= 3 ? 8000 : 20000;
+      // Before the first frame, and while there is not enough data, a slow
+      // network is the likely cause. Give it 20 s instead of 8, so a loaded
+      // Pi or a cold segment cannot trigger a quality step-down by itself.
+      var limit = (!progressed || v.readyState < 3) ? 20000 : 8000;
 
       if (!warned && idle > 4000) {
         warned = true;
@@ -1350,13 +1370,17 @@
         localStorage.setItem('tubetv.prefver', '3');
       }
     } catch (e) {}
-    // An explicit pick pins one level; otherwise ABR is in charge.
+    // Every new video starts in Automatic. A manual pick belongs to the video
+    // it was made on (or to an explicit /watch?...&h= URL), not to everything
+    // opened afterwards: persisting it meant one 1440p/2160p pick forced every
+    // later video to start pinned at a level the Pi could not sustain, and a
+    // past freeze silently saved a degraded tier for later videos.
+    pinnedH = 0;
+    tiers = makeTiers(720);
+    tier = 0;
     try {
-      var savedH = parseInt(localStorage.getItem('tubetv.h') || '', 10);
-      var saved = parseInt(localStorage.getItem('tubetv.tier') || '', 10);
-      pinnedH = savedH || 0;
-      tiers = makeTiers(savedH || 720);
-      if (!savedH && saved > 0 && saved < tiers.length) tier = saved;
+      localStorage.removeItem('tubetv.h');
+      localStorage.removeItem('tubetv.tier');
     } catch (e) {}
     if (stage) stage.className = 'stage';
     document.body.classList.add('cinema');
@@ -1618,6 +1642,10 @@
     if (mm) {
       active = true;
       id = mm[1];
+      try {
+        localStorage.removeItem('tubetv.h');
+        localStorage.removeItem('tubetv.tier');
+      } catch (e) {}
       try {
         var qh = parseInt(new URLSearchParams(location.search).get('h') || '', 10);
         if (qh) {

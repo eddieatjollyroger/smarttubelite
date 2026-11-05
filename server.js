@@ -30,7 +30,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-04.4';
+const BUILD = '2026-11-04.6';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -1074,14 +1074,19 @@ async function handle(req, res) {
     }
 
     let page = { videos: [], token: null };
+    let hops = 0;
     try {
-      // A continuation token can point at a shelf rather than the page tail, in
-      // which case it returns only already-seen videos. Hop a couple of times.
-      for (let i = 0; i < 3; i++) {
+      // A continuation token can point at a shelf rather than the page tail, or
+      // at a shelf that is entirely Shorts (which the home feed filters). Hop
+      // forward until real videos appear, so a Shorts-only stretch does not
+      // look like the end of the feed.
+      for (let i = 0; i < 8; i++) {
         page = await fetchPage(token);
+        hops++;
         token = page.token;
         if (page.videos.length || !token) break;
       }
+      log('more', kind, `${page.videos.length}v`, token ? 'next' : 'end', `${hops}hop`);
     } catch (e) {
       const msg = String(e.message || e);
       if (/401|authentication/i.test(msg)) return json(res, 401, { error: 'signin' });

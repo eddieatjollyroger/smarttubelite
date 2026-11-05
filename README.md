@@ -12,11 +12,13 @@ with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
 - Your actual recommendation feed (logged in), not a "trending" page
 - The home feed hides **Shorts**, so the TV shows landscape videos instead of
   portrait tiles with no title
+- Promoted/sponsored tiles (brand names, often with a leading bullet) are filtered
+  out of every feed, so they cannot be opened as if they were normal videos
 - Subscriptions and watch **history** feeds
 - Search
-- Endless scrolling: reaching the last row loads the next page automatically, and a
-  continuation token that has gone stale on a long-open TV session is refreshed
-  server-side instead of ending the grid
+- Endless scrolling: reaching the last row loads the next page automatically. The
+  server hops past Shorts-only shelves, and a continuation token that has gone stale
+  on a long-open TV session is rebuilt instead of ending the grid
 - H.264/AAC by default; VP9 1440p/2160p when the TV supports it, so old browsers
   still get a compatible stream
 - Videos go fullscreen and start **on their own**, muted first (no key needed), then
@@ -24,7 +26,8 @@ with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
 - Bottom control bar with play/pause, a **Quality** menu listing the resolutions this
   video actually offers, and **Comments** (read-only, scrolls for more)
 - Quality menu with every resolution this video offers; adaptive ABR by default,
-  and an explicit pick pins that level instantly
+  and an explicit pick pins that level for the current video. The next video starts
+  in Automatic again, so one 4K/1440p pick is not forced on everything afterwards
 - Livestreams, played as HLS through a built-in relay (no native HLS required)
 - Remote-friendly UI: big tiles, arrow-key spatial navigation
 - No ads, no tracking pixels, no YouTube player
@@ -97,7 +100,9 @@ master and hls.js starts on 2160p; when the link cannot sustain it, ABR drops to
 within the same codec (no buffer flush and no black screen) and climbs back later. If
 the TV cannot decode VP9, the master is H.264-only and the Quality sheet stops at
 1080p. A VP9 failure reloads the H.264 master at the same position instead of dropping
-straight to the split path.
+straight to the split path. A manual pick applies to the video you are watching; each
+new video starts in Automatic, so an old pin cannot force a level the Pi cannot keep
+up with on every later video.
 
 The first tile starts prefetching as soon as the grid exists (not on window `load`,
 which waits for every thumbnail), and a tile is prefetched 300 ms after the remote
@@ -272,12 +277,17 @@ copies bytes — so CPU stays flat:
 | Resolving a new video | 0.8–1 CPU-s, 2–3 s, 98 MB peak | see below |
 | RAM | 100–135 MB | same |
 
-Resolution is the one slow step: `yt-dlp` normally runs YouTube's player JavaScript
-before it can list formats. Build `2026-11-04.4` skips that for the HLS path
-(`YTDLP_JS_RUNTIME=none`): the HLS playlists this app uses do not carry YouTube's `n`
-throttle parameter, and yt-dlp returns all of them in 1–5 s without a solver. The
-previous Node/V8 solver needed >100 MB per solve; on a 4 GB Pi it could fall into swap
-and hang past the resolve deadline, which is exactly what made VOD starts time out.
+Resolution is the one slow step: `yt-dlp` normally downloads the ~1 MB watch page
+and runs YouTube's player JavaScript before it can list formats. Build `2026-11-04.6`
+skips both for the HLS path: the HLS playlists this app uses do not carry YouTube's
+`n` throttle parameter, and the InnerTube visitor id from the feed is reused as
+`--extractor-args "youtube:player_skip=webpage;visitor_data=..."`, so yt-dlp asks the
+player API directly (measured 1.6–2 s per VOD/live resolve instead of 12–35 s on the
+Pi). If that shortcut fails for any reason (stale visitor, age gate, consent, bot
+check) the same video is retried once with the full webpage extraction, so it is an
+optimization only, never a new failure mode. The previous Node/V8 solver needed
+>100 MB per solve; on a 4 GB Pi it could fall into swap and hang past the resolve
+deadline, which is exactly what made VOD starts time out.
 The server also prefers IPv4 for its own YouTube/InnerTube requests (matching
 `yt-dlp --force-ipv4`), so a broken IPv6 route does not add a connect timeout to every
 lookup.
@@ -315,13 +325,22 @@ stderr, so a broken JS runtime is visible without SSH.
 
 A slow `dns6` with a fast `dns4` is a broken IPv6 route (yt-dlp runs with
 `--force-ipv4` for exactly that reason); a slow `resolve` with fast `dns4`/`http`
-means yt-dlp itself is the bottleneck, not the network.
+means yt-dlp itself is the bottleneck, not the network. Check `load`, `swapFreeMB`
+and `memFreeMB` in the same response: a Pi that is swapping (or has other containers
+competing for its 4 GB) can turn a 2 s resolve into 30 s no matter how the player is
+configured. Reboot it and run `docker stats --no-stream` before blaming the app.
 
 `http://<host>:8484/diag/fast?id=<videoId>` probes the optional direct InnerTube TV
 player path in isolation. It returns the elapsed time and HLS host on success, or the
 exact error when YouTube does not hand back an HLS manifest. The normal resolver tries
 this first (mostly useful for live, where a manifest is always present) and silently
 falls back to yt-dlp, so a failed probe costs one quick request, not a playback failure.
+
+`/logs` labels each yt-dlp resolve with `fast` when the webpage-less visitor path
+worked, `web-fallback` when it tried that and had to repeat the full extraction, and
+`web` when the fast path was not involved. A run of `web-fallback` lines means the
+visitor id is being rejected and startup will look like the old build until the next
+fresh id is cached.
 
 The real limit is bandwidth: traffic passes through the box twice (Google → host →
 TV), so budget ~2× the video bitrate. Gigabit ethernet is plenty.
