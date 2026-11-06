@@ -30,7 +30,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-06.3';
+const BUILD = '2026-11-06.4';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -694,15 +694,15 @@ async function handle(req, res) {
   }
 
   // --- direct player probe ------------------------------------------------
-  // /diag/fast?id=<video> tests the signed-in InnerTube TV player fast path
-  // without falling back to yt-dlp. Useful for confirming whether the Pi can
-  // skip Python on future builds.
+  // /diag/fast?id=<video> tests the default VISIONOS fast path (player JSON +
+  // HLS master) without falling back to yt-dlp. This is the path normal playback
+  // uses, so its ms figure is the real startup resolve time.
   if (path === '/diag/fast') {
     const rid = url.searchParams.get('id') || '';
     if (!/^[A-Za-z0-9_-]{11}$/.test(rid)) return json(res, 400, { error: 'bad video id' });
     const t = Date.now();
     try {
-      const p = await yt.playerHls(rid);
+      const p = await yt.visionosHls(rid);
       return json(res, 200, {
         ok: true,
         ms: Date.now() - t,

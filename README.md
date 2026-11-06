@@ -5,7 +5,8 @@ Hisense/Toshiba **VIDAA**, Samsung Tizen, LG webOS, or any old browser.
 
 It uses YouTube's official TV device-code sign-in, pulls your real home feed
 (`FEwhat_to_watch`), subscriptions and watch history from InnerTube, and plays video
-with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
+from YouTube's HLS manifests (VISIONOS player client, with `yt-dlp` as fallback). No
+YouTube player code is loaded, so there are no ads to block.
 
 ## What you get
 
@@ -103,7 +104,7 @@ out after a few seconds; any key brings them back. Up from the bottom row focuse
 timeline (Left/Right seek 10 s), Up again reaches **Back**, and Down walks back down.
 The **Quality** sheet lists only the resolutions that video has and remembers your
 pick; it opens instantly because `/api/play` already sends the list, so no second
-`yt-dlp` run is needed. Picking a quality switches hls.js to that level immediately —
+resolve is needed. Picking a quality switches hls.js to that level immediately —
 no re-resolve and no restart. **Automatic** clears the pin and hands quality back to
 hls.js.
 Clicking/tapping the picture also play-pauses.
@@ -120,12 +121,12 @@ master (≤1080p) at the same position before giving up on MSE. The old split
 progressive path (a video element *and* a separate audio element, often with a 100 MB+
 open-ended download) is only a fallback for videos with no HLS pair.
 
-Livestreams use the same single element; the first `yt-dlp` probe returns the
-`hls_variant` master directly, so a live channel starts from one resolve instead of two
-(and hls.js gets every level instead of one fixed variant). Live playback starts at
-1080p and releases to ABR after four seconds, so the first picture is already sharp.
-Live HLS from YouTube tops out at **1080p**, even for channels that advertise 4K, because
-the HLS formats yt-dlp receives for those streams only expose AVC ≤1080p. The **Quality**
+Livestreams use the same single element; the first resolve returns the `hls_variant`
+master directly, so a live channel starts from one resolve instead of two (and hls.js
+gets every level instead of one fixed variant). Live playback starts at 1080p and
+releases to ABR after four seconds, so the first picture is already sharp. Live HLS
+from YouTube tops out at **1080p**, even for channels that advertise 4K, because the
+HLS formats YouTube exposes for those streams only carry AVC ≤1080p. The **Quality**
 sheet works for livestreams too: it lists the levels from the live manifest and switches
 between them immediately, with **Automatic** returning control to ABR. A live pick that
 stalls is dropped back to automatic rather than freezing.
@@ -142,11 +143,11 @@ up with on every later video.
 
 The first tile starts prefetching as soon as the grid exists (not on window `load`,
 which waits for every thumbnail), and a tile is prefetched 300 ms after the remote
-stops on it. The prefetch shares the same in-flight `yt-dlp` run as the play request,
+stops on it. The prefetch shares the same in-flight resolve as the play request,
 so OK does not pay for a second resolve. A play request cancels prefetches for *other*
 tiles but never the one already resolving for the tile being opened, so a cold start
 does not throw away a nearly-finished resolve. Resolves are serialized: only one
-yt-dlp (and one challenge solver) runs at a time. Before that, three concurrent
+resolver (and one challenge solver) runs at a time. Before that, three concurrent
 resolves on the Pi took the load average to 35 and made every one of them slower.
 Chromium allows unmuted playback for the rest of the page after any key press
 (`hasBeenActive`), which outlives the ~5 s `isActive` window, so playback starts
@@ -295,6 +296,7 @@ TV app. Revoke any time at `myaccount.google.com → Security → Third-party co
 | `HOST` | `0.0.0.0` | Bind address |
 | `YT_GL` | `US` | Country for recommendations. Try `PT`, `BR`, etc. |
 | `YT_HL` | `en` | UI language |
+| `YT_DIRECT_HLS` | on | Resolve the HLS master through the VISIONOS player client (0.1–0.5 s). Set `0`/`false`/`off` to force yt-dlp |
 | `YTDLP` | `bin/yt-dlp` | Path to yt-dlp binary; wins over every default (Docker sets `/usr/local/bin/yt-dlp`) |
 | `YTDLP_JS_RUNTIME` | `none` | JS challenge solver used for HLS resolves. `none` is fastest and cannot hang; `quickjs`, `node`, or `quickjs:/path/to/qjs` also work. A comma list is allowed |
 | `YTDLP_JS_FALLBACK` | `quickjs` | One extra resolve with this solver for the rare video with no HLS pair (Docker installs `qjs`). Set `none` to disable |
@@ -303,27 +305,35 @@ TV app. Revoke any time at `myaccount.google.com → Security → Third-party co
 
 ## Performance
 
-No transcoding happens anywhere — yt-dlp only returns stream URLs and the server
+No transcoding happens anywhere — the resolvers only return stream URLs and the server
 copies bytes — so CPU stays flat:
 
 | Activity | Measured on an ARM Mac | Pi 5 (scaled) |
 |---|---|---|
 | Idle | ~0% | <1% of one core |
 | Proxying 1080p | 2.6% of one core @ 3.3 Mbps | ~4–6% (up to ~12% for 8 Mbps) |
-| Resolving a new video | 0.8–1 CPU-s, 2–3 s, 98 MB peak | see below |
+| Resolving a new video | 0.1–0.5 s (VISIONOS), no child process | same order |
 | RAM | 100–135 MB | same |
 
-Resolution is the one slow step: `yt-dlp` normally downloads the ~1 MB watch page
-and runs YouTube's player JavaScript before it can list formats. Build `2026-11-06.3`
-skips both for the HLS path: the HLS playlists this app uses do not carry YouTube's
-`n` throttle parameter, and the InnerTube visitor id from the feed is reused as
-`--extractor-args "youtube:player_skip=webpage;visitor_data=..."`, so yt-dlp asks the
-player API directly (measured 1.6–2 s per VOD/live resolve instead of 12–35 s on the
-Pi). If that shortcut fails for any reason (stale visitor, age gate, consent, bot
-check) the same video is retried once with the full webpage extraction, so it is an
-optimization only, never a new failure mode. The previous Node/V8 solver needed
->100 MB per solve; on a 4 GB Pi it could fall into swap and hang past the resolve
-deadline, which is exactly what made VOD starts time out.
+Resolution is the one slow step, so it no longer uses yt-dlp for normal playback.
+Build `2026-11-06.4` asks YouTube's **VISIONOS player client** for the HLS master
+directly: one InnerTube `player` request plus one master playlist fetch, measured at
+**0.1–0.5 s** for a VOD and **~0.08–0.1 s** for a livestream even on the Pi. VISIONOS
+only needs a visitor id (taken for free from the feed that is already loaded), not the
+signed-in account, so a missing or rejected OAuth token does not affect playback. The
+master is cached per video, so a prefetch and the following play request share it.
+
+`yt-dlp` remains the fallback for anything VISIONOS will not serve. That path skips the
+~1 MB watch page and YouTube's player JavaScript, because the HLS playlists this app
+uses do not carry YouTube's `n` throttle parameter: the InnerTube visitor id from the
+feed is reused as `--extractor-args "youtube:player_skip=webpage;visitor_data=..."`, so
+yt-dlp asks the player API directly (measured 1.6–2 s per VOD/live resolve instead of
+12–35 s on the Pi). If that shortcut fails for any reason (stale visitor, age gate,
+consent, bot check) the same video is retried once with the full webpage extraction, so
+it is an optimization only, never a new failure mode. Set `YT_DIRECT_HLS=0` to force the
+yt-dlp path (useful if YouTube changes the VISIONOS surface). The previous Node/V8
+solver needed >100 MB per solve; on a 4 GB Pi it could fall into swap and hang past the
+resolve deadline, which is exactly what made VOD starts time out.
 The server also prefers IPv4 for its own YouTube/InnerTube requests (matching
 `yt-dlp --force-ipv4`), so a broken IPv6 route does not add a connect timeout to every
 lookup.
@@ -339,7 +349,7 @@ want the fallbacks to work there too, put `qjs` on `PATH` or set
 `YTDLP_JS_FALLBACK=quickjs:/path/to/qjs`. A missing solver is ignored by yt-dlp, so
 nothing breaks without it.
 
-Every resolve is serialized (one yt-dlp at a time) and a play request cancels
+Every resolve is serialized (one resolver at a time) and a play request cancels
 prefetches for other videos but shares the one already running for the video being
 opened. A timeout is final: the server does not fall through to a second
 resolver, which previously doubled a failed start. The default deadline is 45 s
@@ -366,17 +376,18 @@ and `memFreeMB` in the same response: a Pi that is swapping (or has other contai
 competing for its 4 GB) can turn a 2 s resolve into 30 s no matter how the player is
 configured. Reboot it and run `docker stats --no-stream` before blaming the app.
 
-`http://<host>:8484/diag/fast?id=<videoId>` probes the optional direct InnerTube TV
-player path in isolation. It returns the elapsed time and HLS host on success, or the
-exact error when YouTube does not hand back an HLS manifest. On the Pi that path
-always answers `no HLS manifest`, so it is opt-in with `YT_DIRECT_HLS=1`; the normal
-resolver goes straight to yt-dlp and does not spend a request probing it.
+`http://<host>:8484/diag/fast?id=<videoId>` probes the VISIONOS path in isolation.
+It returns the elapsed time and HLS host on success, or the exact error when YouTube
+does not hand back an HLS manifest. This is the path normal playback uses, so its `ms`
+figure is the real startup resolve time. Add `&fresh=1` to `/api/play` to bypass the
+per-video cache.
 
-`/logs` labels each yt-dlp resolve with `fast` when the webpage-less visitor path
-worked, `web-fallback` when it tried that and had to repeat the full extraction, and
-`web` when the fast path was not involved. A run of `web-fallback` lines means the
-visitor id is being rejected and startup will look like the old build until the next
-fresh id is cached.
+`/logs` writes `direct <id> <levels>lv <ms>` for a VOD and `direct <id> live <ms>` for a
+livestream when the VISIONOS path served the video. A `ytdlp <id> … fast` line means the
+fallback ran instead; `web-fallback` means yt-dlp's webpage-less visitor path was
+rejected and it repeated the full extraction. A run of `web-fallback` or `direct … ERR`
+lines means the visitor id is being rejected, so startup will look like the old build
+until a fresh id is cached (or `YT_DIRECT_HLS=0` is set).
 
 The real limit is bandwidth: traffic passes through the box twice (Google → host →
 TV), so budget ~2× the video bitrate. Gigabit ethernet is plenty.
@@ -404,7 +415,7 @@ TV), so budget ~2× the video bitrate. Gigabit ethernet is plenty.
   fails, the watchdog steps down to 720p, which YouTube serves as Main profile
   (`avc1.4D401F`).
 - **Live HLS is 1080p at most.** Even 4K live channels expose only AVC HLS ≤1080p to
-  yt-dlp, so the Quality sheet cannot offer more than 1080p for a livestream.
+  the resolver, so the Quality sheet cannot offer more than 1080p for a livestream.
 - Audio and video are separate HLS streams muxed by hls.js into one `<video>`; the
   split element pair is only a fallback for videos with no HLS rendition.
 - Livestreams need `MediaSource` in the TV browser (hls.js). Old VIDAA builds without it
