@@ -43,7 +43,7 @@ with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
 | Key | Grid / search | Player |
 |---|---|---|
 | ↑ ↓ | move between tiles / rows | show the control bar; hide it again |
-| ← → | move between tiles and nav links | seek ∓10 s (bar hidden) / move between buttons |
+| ← → | move between tiles and nav links | seek ∓10 s, accelerating while held (bar hidden) / move between buttons |
 | OK / Enter | open the focused item | play/pause, or activate the focused button |
 | Back / Backspace / Esc | previous page | close the panel, then the bar, then the grid |
 | Play/Pause | — | play / pause |
@@ -314,7 +314,7 @@ copies bytes — so CPU stays flat:
 | RAM | 100–135 MB | same |
 
 Resolution is the one slow step: `yt-dlp` normally downloads the ~1 MB watch page
-and runs YouTube's player JavaScript before it can list formats. Build `2026-11-06.2`
+and runs YouTube's player JavaScript before it can list formats. Build `2026-11-06.3`
 skips both for the HLS path: the HLS playlists this app uses do not carry YouTube's
 `n` throttle parameter, and the InnerTube visitor id from the feed is reused as
 `--extractor-args "youtube:player_skip=webpage;visitor_data=..."`, so yt-dlp asks the

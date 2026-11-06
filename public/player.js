@@ -88,6 +88,12 @@
   var trackTok = '';
   var lastTrackSent = 0;
   var trackArmedAt = 0;
+  // Hold-to-seek: repeated Left/Right presses accelerate the jump, so a long
+  // video does not need dozens of remote presses to move a few minutes.
+  var seekDir = 0;
+  var seekStartedAt = 0;
+  var seekLastAt = 0;
+  var seekTarget = 0;
 
   // YouTube only offers 1440p/2160p as VP9. Ask the browser once; if it can't
   // decode VP9 in MSE, /api/play never mentions those levels and the 4K quality
@@ -822,11 +828,49 @@
   function seek(delta) {
     if (isLive) { hint('Live stream — no seeking', 3000); return; }
     clearResume();
+    seekTarget = 0;
     try {
       v.currentTime = Math.max(0, v.currentTime + delta);
       if (a.src) a.currentTime = v.currentTime;
     } catch (e) {}
     hint((delta > 0 ? '+' : '') + delta + 's · ' + fmt(v.currentTime), 2500);
+    chrome();
+  }
+
+  // A single tap still seeks 10 s. Holding the key accelerates: 20 s after
+  // ~0.4 s, 30 s after ~1 s, 60 s after ~2 s, 120 s after ~3 s, 240 s after
+  // ~5 s and 480 s after ~8 s. The direction timer resets after 0.7 s of no
+  // key, so two separate taps never inherit an old multiplier.
+  function seekByKey(dir) {
+    if (isLive) { hint('Live stream — no seeking', 3000); return; }
+    var now = Date.now();
+    if (dir !== seekDir || now - seekLastAt > 700) {
+      seekDir = dir;
+      seekStartedAt = now;
+      if (now - seekLastAt > 700) seekTarget = 0;
+    }
+    var held = now - seekStartedAt;
+    var step = 10;
+    if (held > 8000) step = 480;
+    else if (held > 5000) step = 240;
+    else if (held > 3000) step = 120;
+    else if (held > 1800) step = 60;
+    else if (held > 900) step = 30;
+    else if (held > 400) step = 20;
+    seekLastAt = now;
+    clearResume();
+    // Repeated keydowns arrive faster than the TV applies a seek. Accumulate
+    // from the pending target, otherwise every repeat reads the same old
+    // currentTime and the player only jumps 10 s no matter how long you hold.
+    var base = seekTarget > 0 ? seekTarget : (v.currentTime || 0);
+    var target = Math.max(0, base + dir * step);
+    if (isFinite(v.duration) && v.duration > 0) {
+      target = Math.min(target, Math.max(0, v.duration - 2));
+    }
+    seekTarget = target;
+    try { v.currentTime = target; } catch (e) {}
+    if (a.src) { try { a.currentTime = target; } catch (e2) {} }
+    hint((dir > 0 ? '+' : '-') + step + 's · ' + fmt(target), 2500);
     chrome();
   }
 
@@ -1616,6 +1660,10 @@
     trackTok = '';
     lastTrackSent = 0;
     trackArmedAt = 0;
+    seekDir = 0;
+    seekStartedAt = 0;
+    seekLastAt = 0;
+    seekTarget = 0;
     lastTime = 0;
     freshRetries = 0;
     audioRetries = 0;
@@ -1675,6 +1723,10 @@
     trackTok = '';
     lastTrackSent = 0;
     trackArmedAt = 0;
+    seekDir = 0;
+    seekStartedAt = 0;
+    seekLastAt = 0;
+    seekTarget = 0;
     stopElapsed();
     loadSeq++;
     teardown();
@@ -1789,6 +1841,16 @@
       return;
     }
 
+    // A held Left/Right must keep seeking. The first press opens the control
+    // bar, and without this the repeats would move button focus instead of
+    // continuing the scrub.
+    if ((isLeft(c, k) || isRight(c, k)) &&
+        seekLastAt && Date.now() - seekLastAt < 700) {
+      e.preventDefault();
+      seekByKey(isLeft(c, k) ? -1 : 1);
+      return;
+    }
+
     // Control bar visible: Left/Right move along the bottom row, Up climbs to
     // the timeline and then to Back, Down comes back down.
     if (barOn) {
@@ -1817,8 +1879,8 @@
         return;
       }
       if (onProg) {
-        if (isLeft(c, k)) { e.preventDefault(); seek(-10); return; }
-        if (isRight(c, k)) { e.preventDefault(); seek(10); return; }
+        if (isLeft(c, k)) { e.preventDefault(); seekByKey(-1); return; }
+        if (isRight(c, k)) { e.preventDefault(); seekByKey(1); return; }
         if (isOk(c, k)) { e.preventDefault(); toggle(); return; }
         return;
       }
@@ -1842,8 +1904,8 @@
       } else focusBtn(0);
       return;
     }
-    if (isLeft(c, k)) { e.preventDefault(); seek(-10); return; }
-    if (isRight(c, k)) { e.preventDefault(); seek(10); return; }
+    if (isLeft(c, k)) { e.preventDefault(); seekByKey(-1); return; }
+    if (isRight(c, k)) { e.preventDefault(); seekByKey(1); return; }
 
     if (isOk(c, k) || k === ' ' || k === 'Spacebar' || c === 32) {
       e.preventDefault();

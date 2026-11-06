@@ -30,7 +30,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-06.2';
+const BUILD = '2026-11-06.3';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -1279,7 +1279,11 @@ async function handle(req, res) {
         token = page.token;
         if (page.videos.length || !token) break;
       }
-      log('more', kind, `${page.videos.length}v`, token ? 'next' : 'end', `${hops}hop`);
+      // A healthy page (videos plus a next token) is the normal infinite-scroll
+      // case; logging every one of them buried real errors under history spam.
+      if (hops > 1 || !page.videos.length || !token) {
+        log('more', kind, `${page.videos.length}v`, token ? 'next' : 'end', `${hops}hop`);
+      }
     } catch (e) {
       const msg = String(e.message || e);
       if (/401|authentication/i.test(msg)) return json(res, 401, { error: 'signin' });
