@@ -30,6 +30,9 @@ with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
   in Automatic again, so one 4K/1440p pick is not forced on everything afterwards
 - Livestreams, played as HLS through a built-in relay (no native HLS required)
 - Remote-friendly UI: big tiles, arrow-key spatial navigation
+- Remembers where each video was left, resumes there on the next open (also via
+  `/watch?id=…&t=<seconds>`), and paints YouTube's red watched bar under the tile on
+  the grid. Within 30 s of the end the next open starts from the beginning
 - No ads, no tracking pixels, no YouTube player
 
 ## Remote controls
@@ -45,6 +48,7 @@ with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
 | C | — | comments (same as the **Comments** button) |
 | D | — | open `/diag` (works from any page) |
 | F | — | toggle fullscreen |
+| 0 | — | restart the video and forget its saved position |
 
 ## How playback starts
 
@@ -61,6 +65,16 @@ hidden overlay; the tile click opens it in place and the URL is updated with
 
 `/watch?id=…` still works as a real page for bookmarks, reloads and deep links;
 it uses the same player script.
+
+## Watch progress
+
+The TV keeps a small map in `localStorage` (`tubetv.hist`) with the last position of
+each video. Opening a tile again seeks there once metadata is ready and shows
+“Resumed at 12:34”; the grid paints YouTube's red watched bar under the thumbnail.
+A position in the first 30 s, or within 30 s of the end, is treated as “not started”,
+so a finished video replays from the top. Press **0** while watching to restart and
+clear the saved position, or open `/watch?id=…&t=300` to jump to a specific second.
+Nothing leaves the TV, and the map is capped at the 200 most recent videos.
 
 The player is cinema-style: video fills the screen and the title/control bars fade
 out after a few seconds; any key brings them back. Up from the bottom row focuses the
@@ -278,7 +292,7 @@ copies bytes — so CPU stays flat:
 | RAM | 100–135 MB | same |
 
 Resolution is the one slow step: `yt-dlp` normally downloads the ~1 MB watch page
-and runs YouTube's player JavaScript before it can list formats. Build `2026-11-04.6`
+and runs YouTube's player JavaScript before it can list formats. Build `2026-11-06.1`
 skips both for the HLS path: the HLS playlists this app uses do not carry YouTube's
 `n` throttle parameter, and the InnerTube visitor id from the feed is reused as
 `--extractor-args "youtube:player_skip=webpage;visitor_data=..."`, so yt-dlp asks the

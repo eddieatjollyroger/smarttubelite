@@ -72,6 +72,13 @@
   var pinnedH = 0;
   var loadTimer = null;
   var loadStartedAt = 0;
+  // Watch progress: { t, d, at } per video id in localStorage. resumeFrom is
+  // the pending seek for the video being opened; resumedTo drives the one-time
+  // "Resumed at ..." hint.
+  var HIST_KEY = 'tubetv.hist';
+  var resumeFrom = 0;
+  var resumedTo = 0;
+  var lastPosSave = 0;
 
   // YouTube only offers 1440p/2160p as VP9. Ask the browser once; if it can't
   // decode VP9 in MSE, /api/play never mentions those levels and the 4K quality
@@ -991,6 +998,7 @@
   v.addEventListener('playing', function () {
     startBtn.style.display = 'none';
     if (!isLive && hud.textContent === 'Starting…') hud.className = 'hud hide';
+    if (resumedTo) { hint('Resumed at ' + fmt(resumedTo), 5000); resumedTo = 0; }
     if (isLive) { lastClock = ''; updateClock(); hint('LIVE', 4000); }
     if (!a.src) return;
     if (Math.abs(a.currentTime - v.currentTime) > 0.25) {
@@ -1000,6 +1008,7 @@
   });
   v.addEventListener('pause', function () {
     a.pause();
+    savePos(true);
     syncPlayLabel();
     chrome();
     // Unexpected pause (browser policy, decoder reset): resume unless the
@@ -1019,7 +1028,11 @@
   });
   v.addEventListener('volumechange', function () { a.volume = v.volume; a.muted = v.muted; });
   v.addEventListener('ratechange', function () { a.playbackRate = v.playbackRate; });
-  v.addEventListener('ended', function () { a.pause(); });
+  v.addEventListener('ended', function () {
+    a.pause();
+    savePos(true);
+    if (window.tubetvProgress) window.tubetvProgress.paint();
+  });
 
   // --- clock + progress -------------------------------------------------
   function updateClock() {
@@ -1043,6 +1056,7 @@
     }
   }
   v.addEventListener('timeupdate', updateClock);
+  v.addEventListener('timeupdate', function () { savePos(false); });
   v.addEventListener('durationchange', updateClock);
   v.addEventListener('loadedmetadata', function () {
     if (resumeAt > 1 && isFinite(v.duration) && resumeAt < v.duration - 5) {
@@ -1050,6 +1064,7 @@
       if (a.src) { try { a.currentTime = resumeAt; } catch (e) {} }
     }
     resumeAt = 0;
+    resumeFrom = 0;
     updateClock();
     // Some TV browsers only honour play() once metadata exists.
     if (v.paused && !userPaused && startBtn.style.display === 'none') tryPlay();
@@ -1331,8 +1346,68 @@
     setBar(false);
   }
 
+  // --- watch progress ---------------------------------------------------
+  // The TV remembers how far each video was watched, resumes there on the next
+  // open, and paints a red bar under the thumbnail on the grid. Kept in one
+  // localStorage map so the grid can read the whole thing in one parse.
+  function histLoad() {
+    try {
+      var h = JSON.parse(localStorage.getItem(HIST_KEY) || '{}');
+      return h && typeof h === 'object' ? h : {};
+    } catch (e) { return {}; }
+  }
+  function histWrite(h) {
+    try { localStorage.setItem(HIST_KEY, JSON.stringify(h)); } catch (e) {}
+  }
+  function savePos(force) {
+    if (!active || isLive || !started || !id) return;
+    var t = v.currentTime || 0;
+    var d = v.duration || 0;
+    if (!(d > 0) || t < 1) return;
+    // Until the resume seek lands the clock is still near zero; saving that
+    // would erase the position the viewer is about to resume from.
+    if (resumeFrom > 0 && t < resumeFrom - 10) return;
+    var now = Date.now();
+    if (!force && now - lastPosSave < 5000) return;
+    lastPosSave = now;
+    var h = histLoad();
+    if (v.ended || t >= d - 15) {
+      delete h[id];
+    } else {
+      h[id] = { t: Math.round(t), d: Math.round(d), at: now };
+      // Keep the map small: parsing it happens on every grid paint.
+      var ids = Object.keys(h);
+      if (ids.length > 200) {
+        ids.sort(function (a, b) { return (h[a].at || 0) - (h[b].at || 0); });
+        for (var i = 0; i < ids.length - 200; i++) delete h[ids[i]];
+      }
+    }
+    histWrite(h);
+  }
+  function clearPos(vid) {
+    var h = histLoad();
+    delete h[vid];
+    histWrite(h);
+  }
+
+  function restorePosition(vid) {
+    resumeFrom = 0;
+    resumedTo = 0;
+    try {
+      var tq = parseFloat(new URLSearchParams(location.search).get('t') || '');
+      var rec = histLoad()[vid];
+      if (tq > 1) resumeFrom = Math.round(tq);
+      else if (rec && rec.t > 30 && rec.d > 0 && rec.t < rec.d - 30) resumeFrom = rec.t;
+      if (resumeFrom > 0) {
+        resumeAt = resumeFrom;
+        resumedTo = resumeFrom;
+      }
+    } catch (e) {}
+  }
+
   function open(id2, anchor) {
     if (active && id === id2) return;
+    if (active) savePos(true);
     if (hls) {
       try { hls.destroy(); } catch (e) {}
       hls = null;
@@ -1347,6 +1422,9 @@
     fsTried = false;
     tier = 0;
     resumeAt = 0;
+    resumeFrom = 0;
+    resumedTo = 0;
+    lastPosSave = 0;
     lastTime = 0;
     freshRetries = 0;
     audioRetries = 0;
@@ -1382,6 +1460,9 @@
       localStorage.removeItem('tubetv.h');
       localStorage.removeItem('tubetv.tier');
     } catch (e) {}
+    // Resume where this TV stopped last time. A video within 30 s of the end
+    // (or the first 30 s) starts over, as YouTube does. An explicit &t= wins.
+    restorePosition(id2);
     if (stage) stage.className = 'stage';
     document.body.classList.add('cinema');
     document.body.classList.add('watch-open');
@@ -1393,6 +1474,9 @@
 
   function close() {
     if (!active) return;
+    savePos(true);
+    resumeFrom = 0;
+    resumedTo = 0;
     stopElapsed();
     loadSeq++;
     teardown();
@@ -1406,6 +1490,7 @@
       var sy = lastScroll || 0;
       (window.requestAnimationFrame || setTimeout)(function () {
         try { window.scrollTo(0, sy); } catch (e) {}
+        if (window.tubetvProgress) window.tubetvProgress.paint();
       });
       if (lastAnchor) { try { lastAnchor.focus(); } catch (e) {} }
       else { try { document.activeElement.blur(); } catch (e) {} }
@@ -1448,6 +1533,20 @@
     }
 
     fullscreenOnce();
+
+    // 0 restarts the current video and forgets the saved position (handy when
+    // auto-resume lands somewhere you did not want). Ignored inside a sheet.
+    if (!panelKind && !isLive && (k === '0' || c === 48)) {
+      e.preventDefault();
+      resumeFrom = 0;
+      resumedTo = 0;
+      clearPos(id);
+      try { v.currentTime = 0; } catch (err) {}
+      if (a.src) { try { a.currentTime = 0; } catch (err2) {} }
+      hint('Restarted');
+      chrome();
+      return;
+    }
 
     // Panel takes every key while it is open — except the two shortcuts, which
     // switch sheets instead of forcing a close first.
@@ -1654,12 +1753,20 @@
           pinnedH = qh;
         }
       } catch (e) {}
+      restorePosition(id);
       resetChrome();
       stage = null;
       document.documentElement.style.overflow = 'hidden';
       load();
     }
   }
+
+  // Last-ditch save for a TV that navigates away or goes to standby without a
+  // pause event.
+  window.addEventListener('pagehide', function () { savePos(true); });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) savePos(true);
+  });
 
   syncPlayLabel();
 })();
