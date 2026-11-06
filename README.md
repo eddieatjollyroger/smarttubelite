@@ -33,6 +33,9 @@ with `yt-dlp`. No YouTube player code is loaded, so there are no ads to block.
 - Remembers where each video was left, resumes there on the next open (also via
   `/watch?id=…&t=<seconds>`), and paints YouTube's red watched bar under the tile on
   the grid. Within 30 s of the end the next open starts from the beginning
+- Two-way watch-progress sync with the signed-in YouTube account: resume positions
+  come from YouTube's history feed and playback updates YouTube's watchtime when
+  possible (local positions always win)
 - No ads, no tracking pixels, no YouTube player
 
 ## Remote controls
@@ -74,7 +77,26 @@ each video. Opening a tile again seeks there once metadata is ready and shows
 A position in the first 30 s, or within 30 s of the end, is treated as “not started”,
 so a finished video replays from the top. Press **0** while watching to restart and
 clear the saved position, or open `/watch?id=…&t=300` to jump to a specific second.
-Nothing leaves the TV, and the map is capped at the 200 most recent videos.
+The map is capped at the 200 most recent videos.
+
+With a signed-in account the TV also syncs with YouTube:
+
+- **Read.** The signed-in History feed marks partially watched videos with a resume
+  overlay. The server turns those percentages into positions and inlines the map into
+  each page (cached for 10 minutes, refreshed in the background). A video with no
+  local record resumes at YouTube's position; a local record — including the “done”
+  marker — always wins. A percentage-only entry is resolved against the real
+  duration once HLS reports it, not against the first partial duration.
+- **Write.** When the TV player response carries YouTube's `playbackTracking` URLs,
+  the player sends the same watchtime beacons YouTube's own player uses: once after
+  about 20 s, then every 30 s, and on pause, close and end. The URLs are fetched
+  lazily on the first ping, so opening a tile and immediately leaving marks nothing.
+  This is strictly best-effort; a failure never affects playback.
+- Without an account both directions are disabled and only the local map is used.
+
+`/diag/progress?debug=1` shows the cached YouTube map plus the overlay fields found in
+the signed-in history feed; `/diag/track?id=<videoId>` checks that a video exposes the
+watchtime URLs (`&write=1&t=60` actually sends one partial ping).
 
 The player is cinema-style: video fills the screen and the title/control bars fade
 out after a few seconds; any key brings them back. Up from the bottom row focuses the
@@ -292,7 +314,7 @@ copies bytes — so CPU stays flat:
 | RAM | 100–135 MB | same |
 
 Resolution is the one slow step: `yt-dlp` normally downloads the ~1 MB watch page
-and runs YouTube's player JavaScript before it can list formats. Build `2026-11-06.1`
+and runs YouTube's player JavaScript before it can list formats. Build `2026-11-06.2`
 skips both for the HLS path: the HLS playlists this app uses do not carry YouTube's
 `n` throttle parameter, and the InnerTube visitor id from the feed is reused as
 `--extractor-args "youtube:player_skip=webpage;visitor_data=..."`, so yt-dlp asks the
@@ -346,9 +368,9 @@ configured. Reboot it and run `docker stats --no-stream` before blaming the app.
 
 `http://<host>:8484/diag/fast?id=<videoId>` probes the optional direct InnerTube TV
 player path in isolation. It returns the elapsed time and HLS host on success, or the
-exact error when YouTube does not hand back an HLS manifest. The normal resolver tries
-this first (mostly useful for live, where a manifest is always present) and silently
-falls back to yt-dlp, so a failed probe costs one quick request, not a playback failure.
+exact error when YouTube does not hand back an HLS manifest. On the Pi that path
+always answers `no HLS manifest`, so it is opt-in with `YT_DIRECT_HLS=1`; the normal
+resolver goes straight to yt-dlp and does not spend a request probing it.
 
 `/logs` labels each yt-dlp resolve with `fast` when the webpage-less visitor path
 worked, `web-fallback` when it tried that and had to repeat the full extraction, and

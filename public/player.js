@@ -77,8 +77,17 @@
   // "Resumed at ..." hint.
   var HIST_KEY = 'tubetv.hist';
   var resumeFrom = 0;
+  var resumePct = 0;
   var resumedTo = 0;
+  var resumeTries = 0;
+  var pctTimer = null;
   var lastPosSave = 0;
+  var localPos = false;
+  // YouTube watchtime sync: the server hands back a one-use token once the
+  // video is actually playing. Progress is posted at most every 30 s.
+  var trackTok = '';
+  var lastTrackSent = 0;
+  var trackArmedAt = 0;
 
   // YouTube only offers 1440p/2160p as VP9. Ask the browser once; if it can't
   // decode VP9 in MSE, /api/play never mentions those levels and the 4K quality
@@ -729,6 +738,12 @@
       .then(function (x) {
         if (seq !== loadSeq) return;
         var j = x.j || {};
+        // One watchtime session per open. A later quality restart keeps the
+        // original cpn/token instead of fragmenting the progress report.
+        if (!trackTok && j.track) trackTok = j.track;
+        // If the page's inlined history map was not ready when the tile was
+        // pressed, the server's cached position can still resume the video.
+        if (!resumeFrom && !resumePct && !localPos) applyResume(j.resume);
         if (j.live && j.hls) { attachHls(j, true); return; }
         if (j.hls && (j.mode === 'mse' || !j.video)) { attachHls(j, false); return; }
         // The server fell back to the split path because this video has no HLS
@@ -806,6 +821,7 @@
 
   function seek(delta) {
     if (isLive) { hint('Live stream — no seeking', 3000); return; }
+    clearResume();
     try {
       v.currentTime = Math.max(0, v.currentTime + delta);
       if (a.src) a.currentTime = v.currentTime;
@@ -998,8 +1014,18 @@
   v.addEventListener('playing', function () {
     startBtn.style.display = 'none';
     if (!isLive && hud.textContent === 'Starting…') hud.className = 'hud hide';
-    if (resumedTo) { hint('Resumed at ' + fmt(resumedTo), 5000); resumedTo = 0; }
+    if (resumedTo) {
+      if (Math.abs((v.currentTime || 0) - resumedTo) < 15) {
+        hint('Resumed at ' + fmt(resumedTo), 5000);
+        resumedTo = 0;
+      } else {
+        seekToResume();
+      }
+    }
     if (isLive) { lastClock = ''; updateClock(); hint('LIVE', 4000); }
+    // Arm the watchtime sync only after the first frame. The first ping is
+    // held back ~20 s so merely opening a tile does not mark it watched.
+    if (!isLive && trackTok && !trackArmedAt) trackArmedAt = Date.now();
     if (!a.src) return;
     if (Math.abs(a.currentTime - v.currentTime) > 0.25) {
       try { a.currentTime = v.currentTime; } catch (e) {}
@@ -1009,6 +1035,7 @@
   v.addEventListener('pause', function () {
     a.pause();
     savePos(true);
+    sendTrack(false);
     syncPlayLabel();
     chrome();
     // Unexpected pause (browser policy, decoder reset): resume unless the
@@ -1031,6 +1058,7 @@
   v.addEventListener('ended', function () {
     a.pause();
     savePos(true);
+    sendTrack(true);
     if (window.tubetvProgress) window.tubetvProgress.paint();
   });
 
@@ -1057,17 +1085,41 @@
   }
   v.addEventListener('timeupdate', updateClock);
   v.addEventListener('timeupdate', function () { savePos(false); });
+  v.addEventListener('timeupdate', function () {
+    // YouTube's own player flushes watchtime every 20-30 s; do the same, and
+    // never let this ping touch the playback start path.
+    if (isLive || !trackTok) return;
+    var now = Date.now();
+    if (!lastTrackSent) {
+      if (trackArmedAt && now - trackArmedAt > 20000) {
+        lastTrackSent = now;
+        sendTrack(false);
+      }
+    } else if (now - lastTrackSent > 30000) {
+      lastTrackSent = now;
+      sendTrack(false);
+    }
+  });
   v.addEventListener('durationchange', updateClock);
   v.addEventListener('loadedmetadata', function () {
-    if (resumeAt > 1 && isFinite(v.duration) && resumeAt < v.duration - 5) {
-      try { v.currentTime = resumeAt; } catch (e) {}
-      if (a.src) { try { a.currentTime = resumeAt; } catch (e) {} }
-    }
-    resumeAt = 0;
-    resumeFrom = 0;
+    // A history tile may only give us a percentage. Resolve it now that the
+    // real duration is known, using the same first/last 30 s rules.
+    if (resumeAt <= 1 && resumePct > 0) scheduleResumePct();
+    seekToResume();
     updateClock();
     // Some TV browsers only honour play() once metadata exists.
     if (v.paused && !userPaused && startBtn.style.display === 'none') tryPlay();
+  });
+  v.addEventListener('canplay', seekToResume);
+  v.addEventListener('durationchange', function () {
+    if (resumePct > 0 && resumeAt <= 1) scheduleResumePct();
+  });
+  v.addEventListener('seeked', function () {
+    if (resumeAt > 1 && Math.abs((v.currentTime || 0) - resumeAt) < 5) {
+      resumeAt = 0;
+      resumeFrom = 0;
+      resumeTries = 0;
+    }
   });
 
   // No native controls (they steal arrow keys on TV browsers) — tap/click the
@@ -1363,7 +1415,7 @@
     if (!active || isLive || !started || !id) return;
     var t = v.currentTime || 0;
     var d = v.duration || 0;
-    if (!(d > 0) || t < 1) return;
+    if (!(d > 0)) return;
     // Until the resume seek lands the clock is still near zero; saving that
     // would erase the position the viewer is about to resume from.
     if (resumeFrom > 0 && t < resumeFrom - 10) return;
@@ -1371,9 +1423,17 @@
     if (!force && now - lastPosSave < 5000) return;
     lastPosSave = now;
     var h = histLoad();
+    var prev = h[id];
+    // After "restart" (or a finished video) the done marker is deliberate.
+    // Closing again after a couple of seconds must not replace it with a
+    // meaningless 1 s position and paint a tiny bar on the grid.
+    if (!v.ended && t < 30 && prev && prev.done) return;
     if (v.ended || t >= d - 15) {
-      delete h[id];
-    } else {
+      // Keep an explicit "finished" marker. It beats any older YouTube resume
+      // position in the inlined history map, so a completed video really does
+      // start from the top on the next open.
+      h[id] = { t: 0, d: Math.round(d), at: now, done: 1 };
+    } else if (t >= 1) {
       h[id] = { t: Math.round(t), d: Math.round(d), at: now };
       // Keep the map small: parsing it happens on every grid paint.
       var ids = Object.keys(h);
@@ -1381,27 +1441,151 @@
         ids.sort(function (a, b) { return (h[a].at || 0) - (h[b].at || 0); });
         for (var i = 0; i < ids.length - 200; i++) delete h[ids[i]];
       }
+    } else {
+      return;
     }
     histWrite(h);
   }
   function clearPos(vid) {
     var h = histLoad();
-    delete h[vid];
+    var d = v.duration || 0;
+    // Same marker as "finished": local always wins over YouTube's position.
+    h[vid] = { t: 0, d: Math.round(d), at: Date.now(), done: 1 };
     histWrite(h);
+  }
+
+  function applyResume(rec) {
+    if (!rec || resumeFrom > 0 || resumePct > 0) return;
+    var t = Number(rec.t) || 0;
+    var d = Number(rec.d) || 0;
+    var p = Number(rec.p) || 0;
+    if (t > 30 && d > 0 && t < d - 30) {
+      resumeFrom = Math.round(t);
+      resumeAt = resumeFrom;
+      resumedTo = resumeFrom;
+      return;
+    }
+    // A record can carry the duration hint and a percentage but no seconds.
+    // Use the hint now; the real duration is only needed for percent-only.
+    if (p > 2 && p < 95 && d > 0) {
+      var pt = Math.round((d * p) / 100);
+      if (pt > 30 && pt < d - 30) {
+        resumeFrom = pt;
+        resumeAt = pt;
+        resumedTo = pt;
+        return;
+      }
+    }
+    // Percent-only entries (duration text missing from the history tile) are
+    // resolved against the real duration once it stabilises.
+    if (p > 2 && p < 95) resumePct = p;
   }
 
   function restorePosition(vid) {
     resumeFrom = 0;
+    resumePct = 0;
     resumedTo = 0;
+    resumeTries = 0;
+    localPos = false;
     try {
       var tq = parseFloat(new URLSearchParams(location.search).get('t') || '');
-      var rec = histLoad()[vid];
-      if (tq > 1) resumeFrom = Math.round(tq);
-      else if (rec && rec.t > 30 && rec.d > 0 && rec.t < rec.d - 30) resumeFrom = rec.t;
+      var local = histLoad()[vid];
+      if (tq > 1) {
+        resumeFrom = Math.round(tq);
+      } else if (local) {
+        // A local record (including the done/cleared marker at t=0) is the
+        // truth for this TV; never let an older YouTube position override it.
+        localPos = true;
+        if (local.t > 30 && local.d > 0 && local.t < local.d - 30) {
+          resumeFrom = local.t;
+        }
+      } else {
+        applyResume((window.TUBETV_YT_PROGRESS || {})[vid]);
+      }
       if (resumeFrom > 0) {
         resumeAt = resumeFrom;
         resumedTo = resumeFrom;
       }
+    } catch (e) {}
+  }
+
+  // The pending resume seek is deliberately retried across loadedmetadata,
+  // canplay and playing: hls.js attaches its MediaSource a little later and
+  // can reset the clock to 0 after the first seek, which previously looked
+  // like a resume that saved position 7 s.
+  function seekToResume() {
+    if (!(resumeAt > 1)) return;
+    if (isFinite(v.duration) && v.duration > 0) {
+      if (resumeAt >= v.duration - 5) {
+        resumeAt = 0;
+        resumeFrom = 0;
+        resumedTo = 0;
+        return;
+      }
+      if (Math.abs((v.currentTime || 0) - resumeAt) < 2) {
+        resumeAt = 0;
+        resumeFrom = 0;
+        resumeTries = 0;
+        return;
+      }
+    }
+    if (resumeTries >= 5) {
+      resumeAt = 0;
+      resumeFrom = 0;
+      resumedTo = 0;
+      return;
+    }
+    resumeTries++;
+    try { v.currentTime = resumeAt; } catch (e) {}
+    if (a.src) { try { a.currentTime = resumeAt; } catch (e) {} }
+  }
+
+  function clearResume() {
+    resumeAt = 0;
+    resumeFrom = 0;
+    resumePct = 0;
+    resumedTo = 0;
+    resumeTries = 0;
+    if (pctTimer) { clearTimeout(pctTimer); pctTimer = null; }
+  }
+
+  // The first HLS duration is often a partial value (audio or the first
+  // fragments only). Resolving a percentage against that landed the seek at
+  // 61 s instead of 92 s. Wait for the value to stop moving, then seek once.
+  function resolveResumePct() {
+    pctTimer = null;
+    if (!(resumePct > 0) || !isFinite(v.duration) || v.duration <= 60) return;
+    var pt = Math.round((v.duration * resumePct) / 100);
+    resumePct = 0;
+    if (pt <= 30 || pt >= v.duration - 30) return;
+    resumeFrom = pt;
+    resumeAt = pt;
+    resumedTo = pt;
+    seekToResume();
+  }
+
+  function scheduleResumePct() {
+    if (!(resumePct > 0) || !isFinite(v.duration) || v.duration <= 60) return;
+    if (pctTimer) clearTimeout(pctTimer);
+    pctTimer = setTimeout(resolveResumePct, 2200);
+  }
+
+  function sendTrack(done, beacon) {
+    if (!trackTok || isLive) return;
+    var t = Math.round(v.currentTime || 0);
+    var d = Math.round(v.duration || 0);
+    if (!(t > 0) || !(d > 0)) return;
+    // Closing a fresh video in the first few seconds should not add it to
+    // YouTube's history. Once the first sync happened, later pings are useful.
+    if (!done && !lastTrackSent && !resumedTo && t < 10) return;
+    var q = '/api/track?tok=' + encodeURIComponent(trackTok) +
+      '&t=' + t + '&d=' + d + (done ? '&done=1' : '');
+    try {
+      if (beacon && navigator.sendBeacon) { navigator.sendBeacon(q); return; }
+      fetch(q, { cache: 'no-store', keepalive: true })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (j && j.disabled) trackTok = ''; })
+        .catch(function () {});
     } catch (e) {}
   }
 
@@ -1423,8 +1607,15 @@
     tier = 0;
     resumeAt = 0;
     resumeFrom = 0;
+    resumePct = 0;
     resumedTo = 0;
+    resumeTries = 0;
+    if (pctTimer) { clearTimeout(pctTimer); pctTimer = null; }
     lastPosSave = 0;
+    localPos = false;
+    trackTok = '';
+    lastTrackSent = 0;
+    trackArmedAt = 0;
     lastTime = 0;
     freshRetries = 0;
     audioRetries = 0;
@@ -1474,9 +1665,16 @@
 
   function close() {
     if (!active) return;
+    sendTrack(false);
     savePos(true);
     resumeFrom = 0;
+    resumePct = 0;
     resumedTo = 0;
+    resumeTries = 0;
+    if (pctTimer) { clearTimeout(pctTimer); pctTimer = null; }
+    trackTok = '';
+    lastTrackSent = 0;
+    trackArmedAt = 0;
     stopElapsed();
     loadSeq++;
     teardown();
@@ -1538,8 +1736,7 @@
     // auto-resume lands somewhere you did not want). Ignored inside a sheet.
     if (!panelKind && !isLive && (k === '0' || c === 48)) {
       e.preventDefault();
-      resumeFrom = 0;
-      resumedTo = 0;
+      clearResume();
       clearPos(id);
       try { v.currentTime = 0; } catch (err) {}
       if (a.src) { try { a.currentTime = 0; } catch (err2) {} }
@@ -1762,10 +1959,16 @@
   }
 
   // Last-ditch save for a TV that navigates away or goes to standby without a
-  // pause event.
-  window.addEventListener('pagehide', function () { savePos(true); });
+  // pause event. sendBeacon is the only network call a dying page can rely on.
+  window.addEventListener('pagehide', function () {
+    savePos(true);
+    sendTrack(false, true);
+  });
   document.addEventListener('visibilitychange', function () {
-    if (document.hidden) savePos(true);
+    if (document.hidden) {
+      savePos(true);
+      sendTrack(false, true);
+    }
   });
 
   syncPlayLabel();

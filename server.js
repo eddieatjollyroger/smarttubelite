@@ -30,7 +30,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-06.1';
+const BUILD = '2026-11-06.2';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -77,6 +77,33 @@ function makeToken({ video, audio, id = '', height = 0, muxed = false }) {
   const timer = setTimeout(() => tokens.delete(t), 6 * 60 * 60 * 1000);
   if (timer.unref) timer.unref();
   return t;
+}
+
+// Watchtime sessions. The URLs themselves are fetched lazily by /api/track on
+// the first progress ping, so opening a video never pays for them.
+const trackTokens = new Map();
+
+function cpn() {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_';
+  const bytes = crypto.randomBytes(16);
+  let out = '';
+  for (let i = 0; i < 16; i++) out += alphabet[bytes[i] & 63];
+  return out;
+}
+
+function makeTrackToken(id) {
+  if (!yt.signedIn()) return '';
+  const t = crypto.randomBytes(12).toString('hex');
+  trackTokens.set(t, { id, cpn: cpn(), sent: 0, fails: 0, at: Date.now(), busy: false });
+  const timer = setTimeout(() => trackTokens.delete(t), 6 * 60 * 60 * 1000);
+  if (timer.unref) timer.unref();
+  return t;
+}
+
+function progressFor(id) {
+  const rec = yt.progressCached()[id];
+  if (!rec) return null;
+  return { p: rec.p || 0, t: rec.t || 0, d: rec.d || 0 };
 }
 
 function json(res, status, obj) {
@@ -695,6 +722,71 @@ async function handle(req, res) {
     }
   }
 
+  // --- progress sync diagnostics -----------------------------------------
+  // /diag/progress shows the cached YouTube history map. `?debug=1` also dumps
+  // the tile overlay keys, which is the only way to see the signed-in history
+  // renderer shape from a Mac without SSH.
+  if (path === '/diag/progress') {
+    const force = url.searchParams.get('force') === '1';
+    const debug = url.searchParams.get('debug') === '1';
+    const out = {
+      signedIn: yt.signedIn(),
+      cached: Object.keys(yt.progressCached()).length,
+      stats: yt.progressStats(),
+    };
+    try {
+      out.map = await yt.progressMap({ force });
+      out.n = Object.keys(out.map).length;
+      if (debug) out.debug = await yt.historyDebug();
+      return json(res, 200, { ok: true, ...out });
+    } catch (e) {
+      return json(res, 200, {
+        ok: false,
+        ...out,
+        map: yt.progressCached(),
+        error: String(e.message).slice(0, 200),
+      });
+    }
+  }
+
+  // /diag/track?id=<video> confirms that the signed-in player response carries
+  // YouTube's watchtime URLs. `?write=1&t=60` actually sends one partial ping.
+  if (path === '/diag/track') {
+    const rid = url.searchParams.get('id') || '';
+    if (!/^[A-Za-z0-9_-]{11}$/.test(rid)) return json(res, 400, { error: 'bad video id' });
+    const t = Math.max(0, Number(url.searchParams.get('t')) || 60);
+    try {
+      const tr = await yt.fetchTracking(rid);
+      if (!tr) return json(res, 200, { ok: false, signedIn: yt.signedIn(), error: 'no tracking URLs' });
+      const out = {
+        ok: true,
+        signedIn: yt.signedIn(),
+        length: tr.length,
+        playback: !!tr.playback,
+        watchtime: !!tr.watchtime,
+      };
+      if (url.searchParams.get('write') === '1') {
+        out.results = await yt.sendWatchStats({
+          playback: tr.playback,
+          watchtime: tr.watchtime,
+          cpn: cpn(),
+          st: 0,
+          et: t,
+          cmt: t,
+          first: true,
+          full: false,
+        });
+      }
+      return json(res, 200, out);
+    } catch (e) {
+      return json(res, 200, {
+        ok: false,
+        signedIn: yt.signedIn(),
+        error: String(e.message).slice(0, 200),
+      });
+    }
+  }
+
   // Test-only proxy so /diag can check whether the proxy path itself works.
   if (path === '/api/probe') {
     const u = url.searchParams.get('u') || '';
@@ -841,6 +933,103 @@ async function handle(req, res) {
     });
   }
 
+  // --- YouTube watch-progress sync ---------------------------------------
+  // Read: the signed-in history feed's resume overlay, cached for a few
+  // minutes. The grid gets the cached map inlined; this endpoint is for the
+  // first page after a cold start and for the diagnostic.
+  if (path === '/api/progress') {
+    const force = url.searchParams.get('force') === '1';
+    const debug = url.searchParams.get('debug') === '1';
+    if (!yt.signedIn()) return json(res, 200, { ok: true, signedIn: false, map: {} });
+    try {
+      const map = await yt.progressMap({ force });
+      const out = {
+        ok: true,
+        signedIn: true,
+        n: Object.keys(map).length,
+        stats: yt.progressStats(),
+        map,
+      };
+      if (debug) {
+        try {
+          out.debug = await yt.historyDebug();
+        } catch (e) {
+          out.debug = { error: String(e.message).slice(0, 160) };
+        }
+      }
+      return json(res, 200, out);
+    } catch (e) {
+      log('progress ERR', String(e.message).slice(0, 140));
+      return json(res, 200, {
+        ok: false,
+        signedIn: true,
+        n: Object.keys(yt.progressCached()).length,
+        stats: yt.progressStats(),
+        map: yt.progressCached(),
+        error: String(e.message).slice(0, 140),
+      });
+    }
+  }
+
+  // Write: a tiny beacon from the player. Tracking URLs are looked up on the
+  // first ping, so a video that is closed immediately sends nothing to
+  // YouTube. Failure is always best-effort and never blocks playback.
+  if (path === '/api/track') {
+    const tok = url.searchParams.get('tok') || '';
+    const rec = trackTokens.get(tok);
+    if (!rec) return json(res, 200, { ok: false, disabled: true });
+    if (rec.busy) return json(res, 200, { ok: true, pending: true });
+
+    const t = Math.max(0, Number(url.searchParams.get('t')) || 0);
+    const done = url.searchParams.get('done') === '1';
+    const d = Math.max(0, Number(url.searchParams.get('d')) || 0);
+    if (!(t > 0) && !done) return json(res, 200, { ok: true, skip: true });
+
+    rec.busy = true;
+    try {
+      const info = await yt.fetchTracking(rec.id);
+      if (!info) {
+        trackTokens.delete(tok);
+        return json(res, 200, { ok: false, disabled: true, reason: 'no tracking' });
+      }
+      const len = Math.round(info.length || d || 0);
+      const et = done ? Math.max(0, len - 1) : Math.min(Math.round(t), Math.max(0, len - 1));
+      const first = rec.sent === 0;
+      const results = await yt.sendWatchStats({
+        playback: info.playback,
+        watchtime: info.watchtime,
+        cpn: rec.cpn,
+        st: 0,
+        et,
+        cmt: et,
+        first,
+        full: done,
+      });
+      rec.sent++;
+      const ok = results.some((r) => r.status >= 200 && r.status < 300);
+      if (!ok) rec.fails++;
+      if (rec.fails >= 3) trackTokens.delete(tok);
+      if (first || done || !ok) {
+        log(
+          'track',
+          rec.id,
+          done ? 'done' : 'progress',
+          `${et}s/${len}s`,
+          results.map((r) => `${r.url || '?'}:${r.status || r.error || '?'}`).join(' '),
+          ok ? '' : `fails=${rec.fails}`
+        );
+      }
+      return json(res, 200, { ok, results, disabled: rec.fails >= 3 });
+    } catch (e) {
+      rec.fails++;
+      if (rec.fails >= 3) trackTokens.delete(tok);
+      log('track ERR', rec.id, String(e.message).slice(0, 140));
+      return json(res, 200, { ok: false, error: String(e.message).slice(0, 140), disabled: rec.fails >= 3 });
+    } finally {
+      rec.busy = false;
+    }
+  }
+
   // --- media proxy -------------------------------------------------------
   const media = path.match(/^\/api\/media\/([a-f0-9]+)\/(video|audio)$/);
   if (media) {
@@ -923,6 +1112,8 @@ async function handle(req, res) {
           acodec: info.acodec,
           heights: [...new Set(levels.map((v) => v.height))].sort((a, b) => b - a),
           mode: 'mse',
+          resume: progressFor(id),
+          track: makeTrackToken(id),
         });
       } catch (e) {
         // A playback request cancelled this prefetch on purpose. Do not log it
@@ -979,6 +1170,8 @@ async function handle(req, res) {
         acodec: info.acodec || null,
         heights: info.heights || [],
         mode: 'split',
+        resume: progressFor(id),
+        track: makeTrackToken(id),
       });
     } catch (e) {
       if (e.code === 'CANCELLED') {
@@ -1175,7 +1368,7 @@ async function handle(req, res) {
     const id = url.searchParams.get('id') || '';
     if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return errorPage(res, new Error('Bad video id'), 400);
     const body = `<div class="watch">${playerMarkup()}</div>`;
-    return html(res, 200, page({ title: 'Watch', body, active: '', signedIn: yt.signedIn(), cinema: true }));
+    return html(res, 200, page({ title: 'Watch', body, active: '', signedIn: yt.signedIn(), cinema: true, ytProgress: yt.progressCached() }));
   }
 
   if (path === '/comments') {
@@ -1194,7 +1387,7 @@ async function handle(req, res) {
       ${msg ? `<div class="empty">${esc(msg)}</div>` : ''}
       ${p.disabled ? '<div class="empty">Comments are disabled for this video.</div>' : ''}
       <div class="cmtlist">${p.comments.map(comment).join('')}</div>`;
-    return html(res, 200, page({ title: 'Comments', body, active: '', signedIn: yt.signedIn() }));
+    return html(res, 200, page({ title: 'Comments', body, active: '', signedIn: yt.signedIn(), ytProgress: yt.progressCached() }));
   }
 
   if (path === '/search') {
@@ -1214,7 +1407,7 @@ async function handle(req, res) {
         ? '<div class="empty">Search failed. Try again in a moment.</div>'
         : grid(p.videos.slice(0, 60), { kind: 'search', token: p.token })
     }`;
-    return html(res, 200, page({ title: q || 'Search', body, active: 'search', signedIn: yt.signedIn() }));
+    return html(res, 200, page({ title: q || 'Search', body, active: 'search', signedIn: yt.signedIn(), ytProgress: yt.progressCached() }));
   }
 
   if (path === '/subs') {
@@ -1229,7 +1422,7 @@ async function handle(req, res) {
         ? grid(p.videos.slice(0, 60), { kind: 'subs', token: p.token })
         : '<div class="empty">Sign in to see your subscriptions.</div>'
     }`;
-    return html(res, 200, page({ title: 'Subscriptions', body, active: 'subs', signedIn: yt.signedIn() }));
+    return html(res, 200, page({ title: 'Subscriptions', body, active: 'subs', signedIn: yt.signedIn(), ytProgress: yt.progressCached() }));
   }
 
   if (path === '/history') {
@@ -1241,6 +1434,9 @@ async function handle(req, res) {
       signedOut = /401|authentication/i.test(String(e.message));
       if (!signedOut) log('history ERR', String(e.message).slice(0, 100));
     }
+    // Keep the resume map fresh in the background; the page itself is not
+    // delayed by it, and the video tiles below already contain their bars.
+    yt.warmProgress();
     const body = `<h1>History</h1>${
       p.videos.length
         ? grid(p.videos.slice(0, 60), { kind: 'history', token: p.token })
@@ -1248,16 +1444,17 @@ async function handle(req, res) {
           ? '<div class="empty">Sign in to see your watch history.</div>'
           : '<div class="empty">No watch history yet.</div>'
     }`;
-    return html(res, 200, page({ title: 'History', body, active: 'history', signedIn: yt.signedIn() }));
+    return html(res, 200, page({ title: 'History', body, active: 'history', signedIn: yt.signedIn(), ytProgress: yt.progressCached() }));
   }
 
   if (path === '/') {
     const p = await yt.homePage();
+    yt.warmProgress();
     const body = `<h1>Recommended</h1>${grid(p.videos.slice(0, 60), {
       kind: p.kind,
       token: p.token,
     })}`;
-    return html(res, 200, page({ title: 'Home', body, active: 'home', signedIn: yt.signedIn() }));
+    return html(res, 200, page({ title: 'Home', body, active: 'home', signedIn: yt.signedIn(), ytProgress: yt.progressCached() }));
   }
 
   return errorPage(res, new Error('Not found'), 404);
