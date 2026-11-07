@@ -30,7 +30,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-06.4';
+const BUILD = '2026-11-06.5';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -1100,6 +1100,9 @@ async function handle(req, res) {
           `${levels.length || 1}lv ${codec}`,
           info.vcodec,
           info.acodec,
+          info.audioLang || info.audioName
+            ? `${info.audioLang || '?'}:${info.audioName || '?'}`
+            : '',
           ua(req)
         );
         return json(res, 200, {
@@ -1110,6 +1113,8 @@ async function handle(req, res) {
           width: info.width,
           vcodec: info.vcodec,
           acodec: info.acodec,
+          audioLang: info.audioLang || '',
+          audioName: info.audioName || '',
           heights: [...new Set(levels.map((v) => v.height))].sort((a, b) => b - a),
           mode: 'mse',
           resume: progressFor(id),

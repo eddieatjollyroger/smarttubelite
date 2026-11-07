@@ -18,8 +18,10 @@ YouTube player code is loaded, so there are no ads to block.
 - Subscriptions and watch **history** feeds
 - Search
 - Endless scrolling: reaching the last row loads the next page automatically. The
-  server hops past Shorts-only shelves, and a continuation token that has gone stale
-  on a long-open TV session is rebuilt instead of ending the grid
+  server hops past Shorts-only shelves, prefers the page-tail continuation over a
+  single shelf's token (so home does not stop after its first shelf), and rebuilds a
+  continuation token that has gone stale on a long-open TV session instead of ending
+  the grid
 - H.264/AAC by default; VP9 1440p/2160p when the TV supports it, so old browsers
   still get a compatible stream
 - Videos go fullscreen and start **on their own**, muted first (no key needed), then
@@ -120,6 +122,13 @@ within it at fragment boundaries. If VP9 playback fails, the player reloads the 
 master (≤1080p) at the same position before giving up on MSE. The old split
 progressive path (a video element *and* a separate audio element, often with a 100 MB+
 open-ended download) is only a fallback for videos with no HLS pair.
+
+Multi-language videos list every auto-dub before the original in YouTube's master,
+and none of those entries is marked `DEFAULT`. The server picks the one named
+`… - original` (preferring AAC-LC over HE-AAC for the TV) instead of the first entry,
+so a Hindi/Arabic dub cannot play over an English video. Livestreams get the same
+treatment in the player: once hls.js publishes its audio tracks, it switches to the
+original track if the stream carries dubs.
 
 Livestreams use the same single element; the first resolve returns the `hls_variant`
 master directly, so a live channel starts from one resolve instead of two (and hls.js
@@ -316,7 +325,7 @@ copies bytes — so CPU stays flat:
 | RAM | 100–135 MB | same |
 
 Resolution is the one slow step, so it no longer uses yt-dlp for normal playback.
-Build `2026-11-06.4` asks YouTube's **VISIONOS player client** for the HLS master
+Build `2026-11-06.5` asks YouTube's **VISIONOS player client** for the HLS master
 directly: one InnerTube `player` request plus one master playlist fetch, measured at
 **0.1–0.5 s** for a VOD and **~0.08–0.1 s** for a livestream even on the Pi. VISIONOS
 only needs a visitor id (taken for free from the feed that is already loaded), not the

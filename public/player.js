@@ -70,6 +70,7 @@
   var prefetchBusy = false;
   var prefetchQueued = '';
   var pinnedH = 0;
+  var pickedAudio = -1;
   var loadTimer = null;
   var loadStartedAt = 0;
   // Watch progress: { t, d, at } per video id in localStorage. resumeFrom is
@@ -219,6 +220,50 @@
       try { hls.autoLevelCapping = fullCap; } catch (e) {}
       report('abr-step', { h: (hls.levels[fullCap] || {}).height || 0 });
     }, 8000);
+  }
+
+  // YouTube's live master lists every auto-dub before the original, and hls.js
+  // defaults to the first audio track. Switch to "… - original" once the
+  // manifest is parsed, so a Hindi/Arabic dub cannot play over the picture.
+  // Tracks that score the same (233 HE-AAC vs 234 AAC-LC, both named Default)
+  // are left alone: switching there would only flush the audio buffer.
+  function audioTrackScore(t) {
+    var name = String(t.name || '');
+    var lang = String(t.lang || '');
+    var score = 0;
+    if (/\boriginal\b/i.test(name)) score += 100;
+    if (!/\bdubbed\b/i.test(name)) score += 10;
+    if (t.default) score += 5;
+    if (/^en(-|$)/i.test(lang)) score += 3;
+    // 234 is YouTube's AAC-LC group; 233 is HE-AAC, which many TV decoders
+    // cannot play. Only used as a tie-breaker.
+    if (String(t.groupId || '') === '234') score += 1;
+    return score;
+  }
+
+  function pickAudioTrack() {
+    if (!hls || !hls.audioTracks || hls.audioTracks.length < 2) return;
+    var current = typeof hls.audioTrack === 'number' ? hls.audioTrack : -1;
+    var curScore =
+      current >= 0 && hls.audioTracks[current] ? audioTrackScore(hls.audioTracks[current]) : -1;
+    var best = -1;
+    var bestScore = -1;
+    for (var i = 0; i < hls.audioTracks.length; i++) {
+      var score = audioTrackScore(hls.audioTracks[i] || {});
+      if (score > bestScore) { bestScore = score; best = i; }
+    }
+    // hls.js applies audioTrack asynchronously and fires AUDIO_TRACKS_UPDATED
+    // again, so remember the index we already asked for. Without this the
+    // listener reports the same switch twice and can flush the audio buffer.
+    if (best >= 0 && best !== current && best !== pickedAudio && bestScore > curScore) {
+      try { hls.audioTrack = best; } catch (e) { return; }
+      pickedAudio = best;
+      report('audio-track', {
+        n: best,
+        name: String(hls.audioTracks[best].name || ''),
+        lang: String(hls.audioTracks[best].lang || '')
+      });
+    }
   }
 
   // Distinct live resolutions, best first. hls.js can expose the same height
@@ -646,8 +691,16 @@
             fallback(data.details || 'fatal');
           }, 0);
         });
+        // hls.js can publish audio tracks slightly after MANIFEST_PARSED on a
+        // live stream. Re-run the picker when the list settles.
+        if (window.Hls.Events.AUDIO_TRACKS_UPDATED) {
+          hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, pickAudioTrack);
+        }
         hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
           liveRetries = 0;
+          // Pick the original-language audio before the first fragment when
+          // the master carries YouTube's auto-dubs (live streams expose them).
+          pickAudioTrack();
           // Live levels only become known once the manifest is parsed. Fill in
           // the sheet here so the cogwheel can list and switch them, exactly
           // like the official TV app.
@@ -775,6 +828,7 @@
       try { hls.destroy(); } catch (e) {}
       hls = null;
     }
+    pickedAudio = -1;
     started = false;
     isLive = false;
     switching = true;
