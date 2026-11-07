@@ -23,11 +23,14 @@
   var playBtn = document.getElementById('ctlplay');
   var gearBtn = document.getElementById('ctlgear');
   var cmtBtn = document.getElementById('ctlcmt');
-  var ctlBtns = [playBtn, gearBtn, cmtBtn];
+  var relBtn = document.getElementById('ctlrel');
+  var ctlBtns = [playBtn, gearBtn, cmtBtn, relBtn];
   var panel = document.getElementById('panel');
   var panelTitle = document.getElementById('paneltitle');
   var panelBody = document.getElementById('panelbody');
   var stage = document.getElementById('stage');
+  var endscreen = document.getElementById('endscreen');
+  var endgrid = document.getElementById('endgrid');
 
   var tiers = [{ h: 720 }, { h: 480 }, { h: 360 }, { muxed: 1 }];
   var tier = 0;
@@ -95,6 +98,12 @@
   var seekStartedAt = 0;
   var seekLastAt = 0;
   var seekTarget = 0;
+  // Suggested videos for the current video, and the end-screen state.
+  var relVideos = [];
+  var relFor = '';
+  var relLoading = false;
+  var relTimer = null;
+  var endOpen = false;
 
   // YouTube only offers 1440p/2160p as VP9. Ask the browser once; if it can't
   // decode VP9 in MSE, /api/play never mentions those levels and the 4K quality
@@ -367,6 +376,15 @@
     s = Math.floor(s || 0);
     var m = Math.floor(s / 60), r = s % 60;
     return m + ':' + (r < 10 ? '0' : '') + r;
+  }
+
+  function escHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   // --- chrome (title bar + control bar) ---------------------------------
@@ -887,6 +905,7 @@
       v.currentTime = Math.max(0, v.currentTime + delta);
       if (a.src) a.currentTime = v.currentTime;
     } catch (e) {}
+    paintPos(v.currentTime || 0);
     hint((delta > 0 ? '+' : '') + delta + 's · ' + fmt(v.currentTime), 2500);
     chrome();
   }
@@ -924,6 +943,9 @@
     seekTarget = target;
     try { v.currentTime = target; } catch (e) {}
     if (a.src) { try { a.currentTime = target; } catch (e2) {} }
+    // Repeated keydowns can outpace the media element's seek; preview the
+    // accumulated target immediately instead of waiting for timeupdate.
+    paintPos(target);
     hint((dir > 0 ? '+' : '-') + step + 's · ' + fmt(target), 2500);
     chrome();
   }
@@ -949,14 +971,19 @@
 
   // --- panels (quality / comments) --------------------------------------
   function openPanel(kind) {
+    if (endOpen) hideEndScreen();
     panelKind = kind;
-    panel.className = 'panel ' + (kind === 'comments' ? 'cmt' : 'qual');
+    panel.className = 'panel ' + (kind === 'comments' || kind === 'related' ? 'cmt' : 'qual');
     panelBody.scrollTop = 0;
     if (barTimer) clearTimeout(barTimer);
     setBar(false);
-    if (kind === 'quality') renderQuality();
-    else renderComments(true);
+    // Focus the sheet before it paints its rows. Related rows restore the
+    // remote's cursor themselves; letting the sheet grab focus afterwards was
+    // stealing it straight back to the empty panel.
     try { panel.focus(); } catch (e) {}
+    if (kind === 'quality') renderQuality();
+    else if (kind === 'related') renderRelated();
+    else renderComments(true);
     report('panel', { kind: kind });
   }
 
@@ -1099,6 +1126,159 @@
       });
   }
 
+  // --- suggested videos -------------------------------------------------
+  function relMeta(v) {
+    return [v.channel, v.views].filter(Boolean).join(' · ');
+  }
+
+  function relCardHtml(v) {
+    return '<button class="relcard" data-id="' + escHtml(v.id) + '">' +
+      '<img src="/api/thumb?id=' + encodeURIComponent(v.id) + '&q=hq720" alt="" loading="lazy" decoding="async">' +
+      '<span class="rt">' + escHtml(v.title || 'Untitled') + '</span>' +
+      '<span class="rc">' + escHtml(relMeta(v)) + '</span>' +
+      '</button>';
+  }
+
+  function relRowHtml(v) {
+    return '<button class="row relrow" data-id="' + escHtml(v.id) + '">' +
+      '<img src="/api/thumb?id=' + encodeURIComponent(v.id) + '&q=hq720" alt="" loading="lazy" decoding="async">' +
+      '<span class="reltxt"><span class="rt">' + escHtml(v.title || 'Untitled') + '</span>' +
+      '<span class="rc">' + escHtml(relMeta(v)) + '</span></span></button>';
+  }
+
+  function bindRelated(root, selector) {
+    var cards = root.querySelectorAll(selector);
+    for (var i = 0; i < cards.length; i++) {
+      cards[i].addEventListener('click', function () {
+        playRelated(this.getAttribute('data-id'));
+      });
+    }
+    return cards;
+  }
+
+  function paintRelated() {
+    if (panelKind !== 'related') return;
+    panelTitle.textContent = 'Suggested';
+    if (relLoading && !relVideos.length) {
+      panelBody.innerHTML = '<div class="pnote">Loading suggestions…</div>';
+      return;
+    }
+    if (!relVideos.length) {
+      panelBody.innerHTML = '<div class="pnote">No suggestions for this video.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < relVideos.length; i++) html += relRowHtml(relVideos[i]);
+    panelBody.innerHTML = html;
+    var rows = bindRelated(panelBody, 'button.relrow');
+    if (rows.length) { try { rows[0].focus(); } catch (e) {} }
+  }
+
+  function renderRelated() {
+    panelTitle.textContent = 'Suggested';
+    if (relFor === id && (relLoading || relVideos.length)) {
+      paintRelated();
+      return;
+    }
+    relFor = id;
+    panelBody.innerHTML = '<div class="pnote">Loading suggestions…</div>';
+    loadRelated(id);
+  }
+
+  function loadRelated(vid) {
+    if (!vid) return;
+    if (relFor === vid && (relLoading || relVideos.length)) return;
+    relFor = vid;
+    relLoading = true;
+    if (panelKind === 'related') paintRelated();
+    if (endOpen) paintEndScreen();
+    fetch('/api/related?id=' + encodeURIComponent(vid), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (relFor !== vid) return;
+        relLoading = false;
+        relVideos = (j && j.videos) || [];
+        if (panelKind === 'related') paintRelated();
+        if (endOpen) paintEndScreen();
+      })
+      .catch(function () {
+        if (relFor !== vid) return;
+        relLoading = false;
+        relVideos = [];
+        if (panelKind === 'related') paintRelated();
+        if (endOpen) paintEndScreen();
+      });
+  }
+
+  // Fetch after the first frame, not during startup. That keeps the critical
+  // resolve path free while still having suggestions ready when the video ends.
+  function scheduleRelated() {
+    if (!id || relFor === id) return;
+    if (relTimer) clearTimeout(relTimer);
+    var want = id;
+    relTimer = setTimeout(function () {
+      relTimer = null;
+      if (active && id === want) loadRelated(want);
+    }, 1200);
+  }
+
+  function paintEndScreen() {
+    if (!endgrid) return;
+    if (relLoading && !relVideos.length) {
+      endgrid.innerHTML = '<div class="pnote">Loading suggestions…</div>';
+      return;
+    }
+    if (!relVideos.length) {
+      endgrid.innerHTML = '<div class="pnote">No suggestions for this video.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < relVideos.length && i < 8; i++) html += relCardHtml(relVideos[i]);
+    endgrid.innerHTML = html;
+    var cards = bindRelated(endgrid, '.relcard');
+    if (endOpen && cards.length) {
+      setTimeout(function () {
+        if (!endOpen) return;
+        try { cards[0].focus(); } catch (e) {}
+      }, 40);
+    }
+  }
+
+  function showEndScreen() {
+    if (!endscreen || !endgrid || isLive || endOpen) return;
+    if (panelKind) closePanel();
+    endOpen = true;
+    if (barTimer) clearTimeout(barTimer);
+    setBar(false);
+    endscreen.className = 'endscreen';
+    if (!relVideos.length) loadRelated(id);
+    paintEndScreen();
+    report('endscreen', { id: id, n: relVideos.length });
+  }
+
+  function hideEndScreen() {
+    if (!endOpen) return;
+    endOpen = false;
+    if (endscreen) endscreen.className = 'endscreen hide';
+    if (endgrid) endgrid.innerHTML = '';
+  }
+
+  function playRelated(vid) {
+    if (!vid) return;
+    if (panelKind) closePanel();
+    hideEndScreen();
+    if (relTimer) { clearTimeout(relTimer); relTimer = null; }
+    relVideos = [];
+    relFor = '';
+    relLoading = false;
+    // Keep one history entry per player session: closing returns to the grid,
+    // not to an arbitrary earlier suggestion.
+    try {
+      history.replaceState({ tubetv: vid }, '', '/watch?id=' + vid);
+    } catch (e) {}
+    open(vid);
+  }
+
   panelBody.addEventListener('scroll', function () {
     if (panelKind !== 'comments' || !cmtToken || cmtLoading) return;
     if (panelBody.scrollTop + panelBody.clientHeight > panelBody.scrollHeight - 500) renderComments(false);
@@ -1106,12 +1286,14 @@
 
   // --- audio/video sync -------------------------------------------------
   v.addEventListener('play', function () {
+    if (endOpen) hideEndScreen();
     if (a.src) a.play().catch(function () {});
     syncPlayLabel();
   });
   v.addEventListener('playing', function () {
     startBtn.style.display = 'none';
     if (!isLive && hud.textContent === 'Starting…') hud.className = 'hud hide';
+    scheduleRelated();
     if (resumedTo) {
       if (Math.abs((v.currentTime || 0) - resumedTo) < 15) {
         hint('Resumed at ' + fmt(resumedTo), 5000);
@@ -1158,27 +1340,38 @@
     savePos(true);
     sendTrack(true);
     if (window.tubetvProgress) window.tubetvProgress.paint();
+    showEndScreen();
   });
 
   // --- clock + progress -------------------------------------------------
-  function updateClock() {
+  // While a seek is still settling (or the viewer is holding Left/Right), the
+  // element's currentTime can lag several seconds behind the target. Paint the
+  // pending target so the bar and clock preview where the scrub will land.
+  function paintPos(pos) {
+    var p = Number(pos);
+    if (!isFinite(p) || p < 0) p = 0;
     var s;
     if (isLive) {
       s = 'LIVE';
     } else if (!isFinite(v.duration) || v.duration <= 0) {
-      s = fmt(v.currentTime);
+      s = fmt(p);
     } else {
-      s = fmt(v.currentTime) + ' / ' + fmt(v.duration) + '   −' + fmt(Math.max(0, v.duration - v.currentTime));
+      s = fmt(p) + ' / ' + fmt(v.duration) + '   −' + fmt(Math.max(0, v.duration - p));
     }
     if (s !== lastClock) {
       lastClock = s;
       clock.textContent = s;
     }
+    if (!isLive && isFinite(v.duration) && v.duration > 0 && progfill) {
+      progfill.style.width = Math.min(100, (p / v.duration) * 100).toFixed(2) + '%';
+    }
+  }
+
+  function updateClock() {
+    var seeking = seekLastAt && Date.now() - seekLastAt < 700;
+    paintPos(seeking ? seekTarget : (v.currentTime || 0));
     if (started && v.readyState >= 2 && isFinite(v.duration) && v.duration > 0) {
       lastTime = v.currentTime || 0;
-    }
-    if (!isLive && isFinite(v.duration) && v.duration > 0 && progfill) {
-      progfill.style.width = Math.min(100, (v.currentTime / v.duration) * 100).toFixed(2) + '%';
     }
   }
   v.addEventListener('timeupdate', updateClock);
@@ -1466,6 +1659,7 @@
   playBtn.addEventListener('click', toggle);
   gearBtn.addEventListener('click', function () { openPanel('quality'); });
   cmtBtn.addEventListener('click', function () { openPanel('comments'); });
+  relBtn.addEventListener('click', function () { openPanel('related'); });
   startBtn.addEventListener('click', function () {
     startBtn.style.display = 'none';
     unmute();
@@ -1694,6 +1888,11 @@
       try { hls.destroy(); } catch (e) {}
       hls = null;
     }
+    if (relTimer) { clearTimeout(relTimer); relTimer = null; }
+    relVideos = [];
+    relFor = '';
+    relLoading = false;
+    hideEndScreen();
     resetChrome();
     id = id2;
     active = true;
@@ -1767,6 +1966,11 @@
 
   function close() {
     if (!active) return;
+    if (relTimer) { clearTimeout(relTimer); relTimer = null; }
+    relVideos = [];
+    relFor = '';
+    relLoading = false;
+    hideEndScreen();
     sendTrack(false);
     savePos(true);
     resumeFrom = 0;
@@ -1803,6 +2007,7 @@
   }
 
   function goBack() {
+    if (endOpen) { hideEndScreen(); chrome(); return; }
     if (panelKind) { closePanel(); return; }
     if (barOn) { setBar(false); return; }
     if (!CINEMA_PAGE && pushed) {
@@ -1838,6 +2043,39 @@
 
     fullscreenOnce();
 
+    // End screen: arrows move through the suggestion grid, OK starts the
+    // focused card, Back closes it and returns to the player controls.
+    if (endOpen) {
+      var ecards = endgrid ? endgrid.querySelectorAll('.relcard') : [];
+      var ecols = 4;
+      if (isLeft(c, k) || isRight(c, k) || isUp(c, k) || isDown(c, k)) {
+        e.preventDefault();
+        if (!ecards.length) return;
+        var cur = Array.prototype.indexOf.call(ecards, document.activeElement);
+        if (cur < 0) cur = 0;
+        var step = isLeft(c, k) ? -1 : isRight(c, k) ? 1 : isUp(c, k) ? -ecols : ecols;
+        var nxt = Math.max(0, Math.min(ecards.length - 1, cur + step));
+        try { ecards[nxt].focus(); } catch (e) {}
+        return;
+      }
+      if (isOk(c, k)) {
+        e.preventDefault();
+        if (document.activeElement && /relcard/.test(document.activeElement.className)) {
+          document.activeElement.click();
+        } else if (ecards.length) {
+          ecards[0].click();
+        }
+        return;
+      }
+      if (k === 'r' || k === 'R') {
+        e.preventDefault();
+        openPanel('related');
+        return;
+      }
+      e.preventDefault();
+      return;
+    }
+
     // 0 restarts the current video and forgets the saved position (handy when
     // auto-resume lands somewhere you did not want). Ignored inside a sheet.
     if (!panelKind && !isLive && (k === '0' || c === 48)) {
@@ -1856,6 +2094,7 @@
     if (panelKind) {
       if (k === 's' || k === 'S') { e.preventDefault(); openPanel('quality'); return; }
       if (k === 'c' || k === 'C') { e.preventDefault(); openPanel('comments'); return; }
+      if (k === 'r' || k === 'R') { e.preventDefault(); openPanel('related'); return; }
       var rows = panelBody.querySelectorAll('button.row');
       if (isUp(c, k) || isDown(c, k)) {
         e.preventDefault();
@@ -1976,6 +2215,7 @@
     }
     if (k === 's' || k === 'S') { e.preventDefault(); openPanel('quality'); return; }
     if (k === 'c' || k === 'C') { e.preventDefault(); openPanel('comments'); return; }
+    if (k === 'r' || k === 'R') { e.preventDefault(); openPanel('related'); return; }
     if (k === 'f' || k === 'F') { fullscreen(); return; }
 
     chrome();

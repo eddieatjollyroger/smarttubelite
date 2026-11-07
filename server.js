@@ -30,7 +30,7 @@ import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-06.5';
+const BUILD = '2026-11-06.6';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -1202,6 +1202,19 @@ async function handle(req, res) {
     } catch (e) {
       log('qualities ERR', id, String(e.message).slice(0, 120));
       return json(res, 502, { error: 'formats unavailable' });
+    }
+  }
+
+  // --- suggested / related videos ---------------------------------------
+  if (path === '/api/related') {
+    const id = url.searchParams.get('id') || '';
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return json(res, 400, { error: 'bad video id' });
+    try {
+      const videos = await yt.relatedPage(id);
+      return json(res, 200, { videos });
+    } catch (e) {
+      log('related ERR', id, String(e.message).slice(0, 140));
+      return json(res, 502, { error: 'suggestions unavailable', videos: [] });
     }
   }
 

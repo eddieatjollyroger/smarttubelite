@@ -27,7 +27,13 @@ YouTube player code is loaded, so there are no ads to block.
 - Videos go fullscreen and start **on their own**, muted first (no key needed), then
   the player turns sound on by itself where the browser allows it
 - Bottom control bar with play/pause, a **Quality** menu listing the resolutions this
-  video actually offers, and **Comments** (read-only, scrolls for more)
+  video actually offers, **Comments** (read-only, scrolls for more), and
+  **Suggested** videos for the current video
+- YouTube-style suggestions: the **Suggested** button opens a scrollable list, and
+  when playback ends an **Up next** end screen shows the first eight as a 4×2 grid.
+  Arrow keys choose a card, OK plays it in place, and Back returns to the player.
+  Suggestions are fetched from the web `/next` surface (the TV surface omits the
+  related column) and cached for 10 minutes per video
 - Quality menu with every resolution this video offers; adaptive ABR by default,
   and an explicit pick pins that level for the current video. The next video starts
   in Automatic again, so one 4K/1440p pick is not forced on everything afterwards
@@ -48,10 +54,11 @@ YouTube player code is loaded, so there are no ads to block.
 | ↑ ↓ | move between tiles / rows | show the control bar; hide it again |
 | ← → | move between tiles and nav links | seek ∓10 s, accelerating while held (bar hidden) / move between buttons |
 | OK / Enter | open the focused item | play/pause, or activate the focused button |
-| Back / Backspace / Esc | previous page | close the panel, then the bar, then the grid |
+| Back / Backspace / Esc | previous page | close the end screen or panel, then the bar, then the grid |
 | Play/Pause | — | play / pause |
 | S | — | quality menu (same as the **Quality** button) |
 | C | — | comments (same as the **Comments** button) |
+| R | — | suggested videos (same as the **Suggested** button) |
 | D | — | open `/diag` (works from any page) |
 | F | — | toggle fullscreen |
 | 0 | — | restart the video and forget its saved position |
@@ -325,7 +332,7 @@ copies bytes — so CPU stays flat:
 | RAM | 100–135 MB | same |
 
 Resolution is the one slow step, so it no longer uses yt-dlp for normal playback.
-Build `2026-11-06.5` asks YouTube's **VISIONOS player client** for the HLS master
+Build `2026-11-06.6` asks YouTube's **VISIONOS player client** for the HLS master
 directly: one InnerTube `player` request plus one master playlist fetch, measured at
 **0.1–0.5 s** for a VOD and **~0.08–0.1 s** for a livestream even on the Pi. VISIONOS
 only needs a visitor id (taken for free from the feed that is already loaded), not the
