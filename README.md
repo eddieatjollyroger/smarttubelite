@@ -43,9 +43,9 @@ YouTube player code is loaded, so there are no ads to block.
   `/watch?id=…&t=<seconds>`), and paints YouTube's red watched bar under the tile on
   the grid. Within 30 s of the end the next open starts from the beginning
 - **Channel browsing:** hold OK on a tile to open a small menu with **Go to channel**,
-  or use the channel row under the player controls (avatar, name and subscriber
-  count). Channel pages list that channel's videos with infinite scroll, the same as
-  a normal TV feed
+  or use the channel row at the right end of the player's button row (avatar, name
+  and subscriber count, no extra height). Channel pages list that channel's videos
+  with infinite scroll, the same as a normal TV feed
 - Two-way watch-progress sync with the signed-in YouTube account: resume positions
   come from YouTube's history feed and playback updates YouTube's watchtime when
   possible. The further valid position wins, so watching a little more on a phone
@@ -100,11 +100,15 @@ a two-line description; below it are the channel's videos, loaded 30 at a time a
 you reach the bottom. Avatars are proxied through `/api/img` for the same reason as
 thumbnails — VIDAA's browser drops third-party images.
 
-While a video is playing, a channel row sits under the control buttons with the
-same avatar, channel name and subscriber count. It is fetched after the first frame
-(so it never delays startup) and is cached for the rest of the session. OK on that
-row saves the current position and opens the channel page; Back returns to the
-player where it left off.
+While a video is playing, a compact channel row sits at the right end of the
+player's button row — the same height as the Quality/Comments/Suggested buttons,
+so it adds no vertical space. It carries the same avatar, channel name and
+subscriber count. It is fetched after the first frame (so it never delays startup)
+and is cached for the rest of the session. OK on that row saves the current
+position and opens the channel page; Back returns to the player, and a second Back
+returns to the feed the video was opened from. Sound is remembered across that
+round trip, so the player comes back with sound instead of the "press OK for
+sound" prompt whenever the browser permits it.
 
 ## Watch progress
 
@@ -364,7 +368,7 @@ copies bytes — so CPU stays flat:
 | RAM | 100–135 MB | same |
 
 Resolution is the one slow step, so it no longer uses yt-dlp for normal playback.
-The current build (`2026-11-06.7`) asks YouTube's **VISIONOS player client** for the HLS master
+The current build (`2026-11-08.1`) asks YouTube's **VISIONOS player client** for the HLS master
 directly: one InnerTube `player` request plus one master playlist fetch, measured at
 **0.1–0.5 s** for a VOD and **~0.08–0.1 s** for a livestream even on the Pi. VISIONOS
 only needs a visitor id (taken for free from the feed that is already loaded), not the

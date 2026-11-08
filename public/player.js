@@ -149,6 +149,18 @@
     }
   }
 
+  // The viewer's sound choice outlives a full page load. Opening a channel from
+  // the player is a real navigation, so the page that comes back has no user
+  // gesture and used to start muted with "press OK for sound" every time.
+  // Remember that sound was on, try to start with it, and let tryPlay() fall
+  // back to muted if the browser refuses on the fresh document.
+  function wantsSound() {
+    try { return localStorage.getItem('tubetv.sound') === '1'; } catch (e) { return false; }
+  }
+  function markSoundOn() {
+    try { localStorage.setItem('tubetv.sound', '1'); } catch (e) {}
+  }
+
   // Highest quality first, then everything below it, then the split fallback.
   function makeTiers(top) {
     var out = [{ h: top }];
@@ -532,13 +544,15 @@
   // --- playback ---------------------------------------------------------
   // Start muted (always allowed), then try to switch sound on in the same
   // gesture window. If the browser refuses, keep playing muted rather than
-  // parking the user on a Play button.
+  // parking the user on a Play button. A remembered sound choice (see
+  // wantsSound) starts unmuted and falls back here if the browser refuses.
   function tryPlay() {
     var seq = loadSeq;
     var p;
     try { p = v.play(); } catch (e) { p = null; }
     if (!p || !p.then) {
       startBtn.style.display = 'none';
+      if (!v.muted) markSoundOn();
       maybeUnmute();
       return;
     }
@@ -547,6 +561,9 @@
       abortRetries = 0;
       startBtn.style.display = 'none';
       report('playing', { tier: tier, muted: v.muted });
+      // Remember a successful unmuted start so a reload (e.g. coming back
+      // from a channel page) can start with sound again.
+      if (!v.muted) markSoundOn();
       maybeUnmute();
     }).catch(function (e) {
       if (seq !== loadSeq) return;
@@ -565,6 +582,7 @@
         soundBlocked = true;
         v.muted = true;
         if (a.src) a.muted = true;
+        hint('Sound off — press OK for sound', 9000);
         setTimeout(function () { if (seq === loadSeq) tryPlay(); }, 250);
         return;
       }
@@ -594,6 +612,8 @@
         if (a.src) a.muted = true;
         retryMuted();
         hint('Sound off — press OK for sound', 9000);
+      } else {
+        markSoundOn();
       }
     }, 700);
   }
@@ -602,6 +622,7 @@
     soundBlocked = false;
     v.muted = false;
     if (a.src) { a.muted = false; a.volume = v.volume; }
+    markSoundOn();
   }
 
   // Chrome/VIDAA can pause a stream on its own (unmute without activation, a
@@ -633,7 +654,7 @@
     curHeights = info.heights || null;
     ttl.textContent = info.title || id;
     document.title = (info.title || 'TubeTV') + ' · TubeTV';
-    v.muted = !hasGesture();
+    v.muted = !hasGesture() && !wantsSound();
     v.src = info.video;
     if (info.audio) {
       a.src = info.audio;
@@ -668,7 +689,7 @@
     document.title = (info.title || (live ? 'Live' : 'TubeTV')) + ' · TubeTV';
     prog.style.display = live ? 'none' : 'block';
     if (live) hint('LIVE', 4000);
-    v.muted = !hasGesture();
+    v.muted = !hasGesture() && !wantsSound();
     report(live ? 'live-attach' : 'hls-attach', {
       hasMSE: typeof window.MediaSource !== 'undefined',
       h: info.height,
@@ -1357,9 +1378,16 @@
     relFor = '';
     relLoading = false;
     // Keep one history entry per player session: closing returns to the grid,
-    // not to an arbitrary earlier suggestion.
+    // not to an arbitrary earlier suggestion. Preserve the grid URL the player
+    // was opened from so a standalone /watch page (the browser reloads it after
+    // a channel visit) can return there even when history.back() stalls.
     try {
-      history.replaceState({ tubetv: vid }, '', '/watch?id=' + vid);
+      var st = history.state || {};
+      history.replaceState(
+        { tubetv: vid, from: st.from || '' },
+        '',
+        '/watch?id=' + vid
+      );
     } catch (e) {}
     open(vid);
   }
@@ -2194,8 +2222,27 @@
   function goBack() {
     if (endOpen) { hideEndScreen(); chrome(); return; }
     if (panelKind) { closePanel(); return; }
+    // Standalone /watch (deep link or the page the browser reloaded after a
+    // channel visit) has no grid underneath. Spending the first Back on
+    // hiding the control bar made Back look dead right after coming back
+    // from a channel: the hint stayed up and a second press was needed (or
+    // was swallowed by exiting fullscreen). Leave the player immediately.
+    if (CINEMA_PAGE) {
+      var from = '';
+      try { from = (history.state && history.state.from) || ''; } catch (e) {}
+      // A traversal back to the grid can leave the old /watch document on
+      // screen with only the URL changed on some browsers. Navigate to the
+      // remembered feed explicitly so Back always lands on the grid.
+      if (from && from !== location.pathname + location.search) {
+        window.location.href = from;
+        return;
+      }
+      if (window.history.length > 1) window.history.back();
+      else window.location.href = '/';
+      return;
+    }
     if (barOn) { setBar(false); return; }
-    if (!CINEMA_PAGE && pushed) {
+    if (pushed) {
       try { history.back(); return; } catch (e) {}
     }
     if (window.history.length > 1) window.history.back();
@@ -2450,7 +2497,16 @@
           if (m && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
             e.preventDefault();
             if (history.pushState) {
-              history.pushState({ tubetv: m[1] }, '', '/watch?id=' + m[1]);
+              // Remember the grid page this came from. If the browser later
+              // recreates /watch as a standalone document (for example after
+              // visiting a channel and pressing Back), that document can
+              // still return to the right feed instead of relying on a
+              // history.back() that only changes the URL.
+              history.pushState(
+                { tubetv: m[1], from: location.pathname + location.search },
+                '',
+                '/watch?id=' + m[1]
+              );
               pushed = true;
             }
             open(m[1], el);
