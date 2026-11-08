@@ -1,14 +1,15 @@
 #!/bin/sh
 # Deploy TubeTV to the Raspberry Pi and rebuild the container.
 #
-#   ./deploy.sh                 # pi@192.168.1.69
-#   ./deploy.sh joao@192.168.1.69
+#   ./deploy.sh                 # eddie@192.168.1.69
+#   ./deploy.sh eddie@192.168.1.69
 #
 # The Pi moved to 192.168.1.69 (DHCP). Give it a DHCP reservation in the router
-# so the TV's bookmark does not break again.
+# so the TV's bookmark does not break again. The host account is `eddie`
+# (`edberry5`), not `pi`/`joao`.
 set -eu
 
-TARGET="${1:-pi@192.168.1.69}"
+TARGET="${1:-eddie@192.168.1.69}"
 HOST="${TARGET#*@}"
 DEST="/mnt/ssd1/tubetv/smarttubelite"
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -41,8 +42,8 @@ while [ "$i" -lt 20 ]; do
   if out=$(curl -fsS --max-time 5 "http://$HOST:8484/healthz" 2>/dev/null); then
     echo "$out"
     case "$out" in
-      *'"build":"2026-11-06.6"'*) echo "==> deployed"; exit 0 ;;
-      *) echo "!! health responded but the build is not 2026-11-06.6" >&2; exit 1 ;;
+      *'"build":"2026-11-06.7"'*) echo "==> deployed"; exit 0 ;;
+      *) echo "!! health responded but the build is not 2026-11-06.7" >&2; exit 1 ;;
     esac
   fi
 done

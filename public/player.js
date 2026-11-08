@@ -24,7 +24,11 @@
   var gearBtn = document.getElementById('ctlgear');
   var cmtBtn = document.getElementById('ctlcmt');
   var relBtn = document.getElementById('ctlrel');
-  var ctlBtns = [playBtn, gearBtn, cmtBtn, relBtn];
+  var chanRow = document.getElementById('chanrow');
+  var chanImg = document.getElementById('chanimg');
+  var chanNameEl = document.getElementById('channame');
+  var chanSubsEl = document.getElementById('chansubs');
+  var ctlBtns = [playBtn, gearBtn, cmtBtn, relBtn, chanRow];
   var panel = document.getElementById('panel');
   var panelTitle = document.getElementById('paneltitle');
   var panelBody = document.getElementById('panelbody');
@@ -87,6 +91,8 @@
   var pctTimer = null;
   var lastPosSave = 0;
   var localPos = false;
+  var resumeSource = '';
+  var progressFetchedFor = '';
   // YouTube watchtime sync: the server hands back a one-use token once the
   // video is actually playing. Progress is posted at most every 30 s.
   var trackTok = '';
@@ -104,6 +110,14 @@
   var relLoading = false;
   var relTimer = null;
   var endOpen = false;
+  // Channel identity for the bar under the player controls. The play response
+  // carries the id/author; the avatar and subscriber count arrive lazily.
+  var chanId = '';
+  var chanNameText = '';
+  var chanInfoFor = '';
+  var chanLoadingFor = '';
+  var chanTimer = null;
+  var chanInfoCache = {};
 
   // YouTube only offers 1440p/2160p as VP9. Ask the browser once; if it can't
   // decode VP9 in MSE, /api/play never mentions those levels and the 4K quality
@@ -417,6 +431,76 @@
 
   function syncPlayLabel() {
     playBtn.textContent = v.paused ? 'Play' : 'Pause';
+  }
+
+  // --- channel bar ------------------------------------------------------
+  function paintChannel() {
+    if (!chanRow) return;
+    if (!chanId) {
+      chanRow.style.display = 'none';
+      chanNameEl.textContent = 'Channel';
+      chanSubsEl.textContent = '';
+      chanImg.style.display = 'none';
+      return;
+    }
+    chanRow.style.display = 'flex';
+    chanNameEl.textContent = chanNameText || 'Channel';
+  }
+
+  function applyChannelInfo(info) {
+    if (!info) return;
+    if (info.title) chanNameText = String(info.title).trim();
+    if (info.subs) chanSubsEl.textContent = info.subs;
+    if (info.avatar) {
+      chanImg.src = '/api/img?u=' + encodeURIComponent(info.avatar);
+      chanImg.style.display = 'block';
+    }
+    paintChannel();
+  }
+
+  function loadChannelInfo() {
+    if (!active || !chanId) return;
+    var want = chanId;
+    if (chanInfoCache[want]) {
+      applyChannelInfo(chanInfoCache[want]);
+      return;
+    }
+    if (chanLoadingFor === want) return;
+    chanLoadingFor = want;
+    fetch('/api/channel?id=' + encodeURIComponent(want) + '&info=1', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (chanLoadingFor === want) chanLoadingFor = '';
+        if (!j || !j.info) return;
+        chanInfoCache[want] = j.info;
+        if (active && chanId === want) applyChannelInfo(j.info);
+      })
+      .catch(function () {
+        if (chanLoadingFor === want) chanLoadingFor = '';
+      });
+  }
+
+  // Fetch after the first frame, like related videos: startup never waits on
+  // the channel header.
+  function scheduleChannelInfo() {
+    if (!chanId) return;
+    if (chanTimer) clearTimeout(chanTimer);
+    var want = chanId;
+    chanTimer = setTimeout(function () {
+      chanTimer = null;
+      if (active && chanId === want) loadChannelInfo();
+    }, 1200);
+  }
+
+  function setChannel(id2, name) {
+    chanId = /^UC[A-Za-z0-9_-]{22}$/.test(String(id2 || '')) ? id2 : '';
+    chanNameText = String(name || '').trim();
+    chanInfoFor = '';
+    if (chanTimer) { clearTimeout(chanTimer); chanTimer = null; }
+    chanSubsEl.textContent = '';
+    chanImg.style.display = 'none';
+    paintChannel();
+    if (chanId) scheduleChannelInfo();
   }
 
   function fullscreen() {
@@ -818,6 +902,7 @@
         // One watchtime session per open. A later quality restart keeps the
         // original cpn/token instead of fragmenting the progress report.
         if (!trackTok && j.track) trackTok = j.track;
+        if (j.channelId || j.channel) setChannel(j.channelId, j.channel || '');
         // If the page's inlined history map was not ready when the tile was
         // pressed, the server's cached position can still resume the video.
         if (!resumeFrom && !resumePct && !localPos) applyResume(j.resume);
@@ -1660,6 +1745,12 @@
   gearBtn.addEventListener('click', function () { openPanel('quality'); });
   cmtBtn.addEventListener('click', function () { openPanel('comments'); });
   relBtn.addEventListener('click', function () { openPanel('related'); });
+  chanRow.addEventListener('click', function () {
+    if (!chanId) { hint('Channel unavailable', 3000); chrome(); return; }
+    savePos(true);
+    sendTrack(false);
+    window.location.href = '/channel?id=' + encodeURIComponent(chanId);
+  });
   startBtn.addEventListener('click', function () {
     startBtn.style.display = 'none';
     unmute();
@@ -1748,29 +1839,70 @@
 
   function applyResume(rec) {
     if (!rec || resumeFrom > 0 || resumePct > 0) return;
-    var t = Number(rec.t) || 0;
-    var d = Number(rec.d) || 0;
-    var p = Number(rec.p) || 0;
-    if (t > 30 && d > 0 && t < d - 30) {
-      resumeFrom = Math.round(t);
-      resumeAt = resumeFrom;
-      resumedTo = resumeFrom;
+    var pos = resumePosOf(rec);
+    if (pos) {
+      setResume(pos.t, 'server');
       return;
     }
-    // A record can carry the duration hint and a percentage but no seconds.
-    // Use the hint now; the real duration is only needed for percent-only.
-    if (p > 2 && p < 95 && d > 0) {
-      var pt = Math.round((d * p) / 100);
-      if (pt > 30 && pt < d - 30) {
-        resumeFrom = pt;
-        resumeAt = pt;
-        resumedTo = pt;
-        return;
-      }
-    }
+    var p = Number(rec.p) || 0;
     // Percent-only entries (duration text missing from the history tile) are
     // resolved against the real duration once it stabilises.
     if (p > 2 && p < 95) resumePct = p;
+  }
+
+  // Turn either record shape into a resumable position. `p` is a percentage
+  // from YouTube's history tile; `t`/`d` are seconds (local records and newer
+  // YouTube records carry seconds too). The first 30 s and the last 30 s are
+  // not worth resuming, exactly like YouTube.
+  function resumePosOf(rec) {
+    if (!rec) return null;
+    var d = Number(rec.d) || 0;
+    var t = Number(rec.t) || 0;
+    var p = Number(rec.p) || 0;
+    if (!(t > 0) && p > 0 && d > 0) t = Math.round((d * p) / 100);
+    if (!(t > 0)) return null;
+    if (p >= 95) return null;
+    if (t <= 30) return null;
+    if (d > 0 && t >= d - 30) return null;
+    return { t: Math.round(t), d: Math.round(d) };
+  }
+
+  function writePos(vid, t, d) {
+    var h = histLoad();
+    h[vid] = { t: Math.round(t), d: Math.round(d) || 0, at: Date.now() };
+    histWrite(h);
+  }
+
+  function rawPosOf(rec) {
+    if (!rec) return 0;
+    var t = Number(rec.t) || 0;
+    var d = Number(rec.d) || 0;
+    var p = Number(rec.p) || 0;
+    if (!(t > 0) && p > 0 && d > 0) t = Math.round((d * p) / 100);
+    return Math.max(0, Math.round(t));
+  }
+
+  // Local records that deliberately mean "start from the top": the video was
+  // finished (done marker), is within 30 s of the end, or was restarted and
+  // only watched for a few seconds. YouTube history can still carry an older,
+  // further position for such a video; resuming there would look like the
+  // player jumped into the middle on its own.
+  function localBlocksYt(rec) {
+    if (!rec) return false;
+    if (rec.done) return true;
+    var raw = rawPosOf(rec);
+    var d = Number(rec.d) || 0;
+    if (d > 0 && raw >= d - 30) return true;
+    if (raw > 0 && raw <= 30) return true;
+    // No usable position at all in the local record.
+    return !resumePosOf(rec);
+  }
+
+  function setResume(pos, source) {
+    resumeFrom = Math.round(pos);
+    resumeAt = resumeFrom;
+    resumedTo = resumeFrom;
+    resumeSource = source || '';
   }
 
   function restorePosition(vid) {
@@ -1779,26 +1911,76 @@
     resumedTo = 0;
     resumeTries = 0;
     localPos = false;
+    resumeSource = '';
     try {
       var tq = parseFloat(new URLSearchParams(location.search).get('t') || '');
-      var local = histLoad()[vid];
       if (tq > 1) {
-        resumeFrom = Math.round(tq);
-      } else if (local) {
-        // A local record (including the done/cleared marker at t=0) is the
-        // truth for this TV; never let an older YouTube position override it.
-        localPos = true;
-        if (local.t > 30 && local.d > 0 && local.t < local.d - 30) {
-          resumeFrom = local.t;
-        }
-      } else {
-        applyResume((window.TUBETV_YT_PROGRESS || {})[vid]);
+        // An explicit &t= always wins.
+        setResume(tq, 'param');
+        return;
       }
-      if (resumeFrom > 0) {
-        resumeAt = resumeFrom;
-        resumedTo = resumeFrom;
+      var local = histLoad()[vid] || null;
+      var yt = (window.TUBETV_YT_PROGRESS || {})[vid] || null;
+      // Any record at all means /api/play's cached position must not guess on
+      // top of this decision.
+      localPos = !!(local || yt);
+      var lp = resumePosOf(local);
+      var yp = resumePosOf(yt);
+      if (localBlocksYt(local)) {
+        // Finished, near the end, or just restarted on this TV: start at the
+        // beginning even if YouTube remembers an older middle position.
+        resumeFrom = 0;
+      } else if (yp && (!lp || yp.t >= lp.t + 15)) {
+        // YouTube is further along, typically because the viewer continued on
+        // a phone. Use it and write it back so the grid bar and this TV agree
+        // even if the next page load has no history map.
+        setResume(yp.t, 'yt');
+        writePos(vid, yp.t, yp.d || (local && local.d) || 0);
+      } else if (lp) {
+        setResume(lp.t, 'local');
+      } else if (yp) {
+        setResume(yp.t, 'yt');
+        writePos(vid, yp.t, yp.d || 0);
       }
     } catch (e) {}
+    refreshPosition(vid);
+  }
+
+  // The inlined history map can be up to ten minutes old on a TV that has been
+  // sitting on the grid. When this video has a local record, ask for one fresh
+  // history page while the stream is still starting, and pull the viewer
+  // forward if another device got further. One page is enough: the current
+  // video is at the top of history. A terminal local state (finished/restarted)
+  // skips the request entirely.
+  function refreshPosition(vid) {
+    if (progressFetchedFor === vid) return;
+    if (!window.TUBETV_SIGNED_IN || !vid) return;
+    var local = histLoad()[vid];
+    if (!local || localBlocksYt(local)) return;
+    progressFetchedFor = vid;
+    fetch('/api/progress?force=1&pages=1', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || !j.map || typeof j.map !== 'object') return;
+        window.TUBETV_YT_PROGRESS = j.map;
+        if (!active || id !== vid) return;
+        // The viewer may have finished or restarted while the request was in
+        // flight; never undo a deliberate local state.
+        if (localBlocksYt(histLoad()[vid])) return;
+        var yp = resumePosOf(j.map[vid]);
+        if (!yp) return;
+        var base = resumeFrom > 0 ? resumeFrom : 0;
+        var cur = v.currentTime || 0;
+        // Only during startup, and only for a meaningful jump forward.
+        if (yp.t < base + 15) return;
+        if (started && cur > Math.max(base, 0) + 20) return;
+        setResume(yp.t, 'yt');
+        resumePct = 0;
+        writePos(vid, yp.t, yp.d || v.duration || 0);
+        seekToResume();
+        hint('Resumed at ' + fmt(yp.t), 5000);
+      })
+      .catch(function () {});
   }
 
   // The pending resume seek is deliberately retried across loadedmetadata,
@@ -1892,6 +2074,7 @@
     relVideos = [];
     relFor = '';
     relLoading = false;
+    setChannel('', '');
     hideEndScreen();
     resetChrome();
     id = id2;
@@ -1910,6 +2093,8 @@
     if (pctTimer) { clearTimeout(pctTimer); pctTimer = null; }
     lastPosSave = 0;
     localPos = false;
+    resumeSource = '';
+    progressFetchedFor = '';
     trackTok = '';
     lastTrackSent = 0;
     trackArmedAt = 0;
@@ -2276,21 +2461,31 @@
       }
     }, true);
 
-    window.addEventListener('popstate', function (e) {
-      var m = /[?&]id=([A-Za-z0-9_-]{11})/.exec(location.search);
+    window.addEventListener('popstate', function () {
+      // Only /watch URLs carry a video id. A channel URL is /channel?id=UC…;
+      // matching the first 11 characters of that 24-character id opened a
+      // bogus video instead of closing the overlay, so the video underneath
+      // kept playing after Back.
+      var m = /^\/watch\?(?:.*&)?id=([A-Za-z0-9_-]{11})(?:[&#]|$)/.exec(
+        location.pathname + location.search
+      );
       if (active && !m) { pushed = false; close(); return; }
       if (active && m && m[1] !== id) { pushed = false; open(m[1]); return; }
       if (!active && m) { pushed = false; open(m[1]); }
     });
 
-    var initial = /[?&]id=([A-Za-z0-9_-]{11})/.exec(location.search);
-    if (initial && /^\/watch/.test(location.pathname)) {
+    var initial = /^\/watch\?(?:.*&)?id=([A-Za-z0-9_-]{11})(?:[&#]|$)/.exec(
+      location.pathname + location.search
+    );
+    if (initial) {
       pushed = false;
       open(initial[1]);
     }
   } else {
     // Standalone /watch page.
-    var mm = /[?&]id=([A-Za-z0-9_-]{11})/.exec(location.search);
+    var mm = /^\/watch\?(?:.*&)?id=([A-Za-z0-9_-]{11})(?:[&#]|$)/.exec(
+      location.pathname + location.search
+    );
     if (mm) {
       active = true;
       id = mm[1];

@@ -42,9 +42,15 @@ YouTube player code is loaded, so there are no ads to block.
 - Remembers where each video was left, resumes there on the next open (also via
   `/watch?id=…&t=<seconds>`), and paints YouTube's red watched bar under the tile on
   the grid. Within 30 s of the end the next open starts from the beginning
+- **Channel browsing:** hold OK on a tile to open a small menu with **Go to channel**,
+  or use the channel row under the player controls (avatar, name and subscriber
+  count). Channel pages list that channel's videos with infinite scroll, the same as
+  a normal TV feed
 - Two-way watch-progress sync with the signed-in YouTube account: resume positions
   come from YouTube's history feed and playback updates YouTube's watchtime when
-  possible (local positions always win)
+  possible. The further valid position wins, so watching a little more on a phone
+  resumes there — but a video finished or restarted on the TV still starts from the
+  top
 - No ads, no tracking pixels, no YouTube player
 
 ## Remote controls
@@ -53,7 +59,7 @@ YouTube player code is loaded, so there are no ads to block.
 |---|---|---|
 | ↑ ↓ | move between tiles / rows | show the control bar; hide it again |
 | ← → | move between tiles and nav links | seek ∓10 s, accelerating while held (bar hidden) / move between buttons |
-| OK / Enter | open the focused item | play/pause, or activate the focused button |
+| OK / Enter | open the focused item; hold ~0.7 s for **Go to channel** | play/pause, or activate the focused button |
 | Back / Backspace / Esc | previous page | close the end screen or panel, then the bar, then the grid |
 | Play/Pause | — | play / pause |
 | S | — | quality menu (same as the **Quality** button) |
@@ -79,6 +85,27 @@ hidden overlay; the tile click opens it in place and the URL is updated with
 `/watch?id=…` still works as a real page for bookmarks, reloads and deep links;
 it uses the same player script.
 
+## Channels
+
+Holding OK on a tile for about 0.7 s opens a small menu with **Go to channel**,
+**Play video** and **Cancel**; a normal short press still opens the video
+immediately, so nothing gets slower. The menu only appears for tiles whose channel
+id is known (the TV, search and related feeds all carry it). Back closes the menu
+and puts focus back on the same tile.
+
+A channel page (`/channel?id=UC…`) opens YouTube's **Videos** tab through the web
+`browse` surface, because the TV surface does not expose the avatar or subscriber
+count. The header shows the avatar, name, handle, subscriber count, video count and
+a two-line description; below it are the channel's videos, loaded 30 at a time as
+you reach the bottom. Avatars are proxied through `/api/img` for the same reason as
+thumbnails — VIDAA's browser drops third-party images.
+
+While a video is playing, a channel row sits under the control buttons with the
+same avatar, channel name and subscriber count. It is fetched after the first frame
+(so it never delays startup) and is cached for the rest of the session. OK on that
+row saves the current position and opens the channel page; Back returns to the
+player where it left off.
+
 ## Watch progress
 
 The TV keeps a small map in `localStorage` (`tubetv.hist`) with the last position of
@@ -93,10 +120,14 @@ With a signed-in account the TV also syncs with YouTube:
 
 - **Read.** The signed-in History feed marks partially watched videos with a resume
   overlay. The server turns those percentages into positions and inlines the map into
-  each page (cached for 10 minutes, refreshed in the background). A video with no
-  local record resumes at YouTube's position; a local record — including the “done”
-  marker — always wins. A percentage-only entry is resolved against the real
-  duration once HLS reports it, not against the first partial duration.
+  each page (cached for 10 minutes, refreshed in the background). The player compares
+  the local and YouTube positions and takes the **further** one, so continuing a
+  video on a phone and coming back to the TV resumes where the phone stopped. A
+  local record that means “start from the top” — the done marker, a position in the
+  last 30 s, or a restart watched only briefly — is never overridden by an older
+  YouTube position. The chosen position is written back to the local map so the grid
+  bar agrees. A percentage-only entry is resolved against the real duration once HLS
+  reports it, not against the first partial duration.
 - **Write.** When the TV player response carries YouTube's `playbackTracking` URLs,
   the player sends the same watchtime beacons YouTube's own player uses: once after
   about 20 s, then every 30 s, and on pause, close and end. The URLs are fetched
@@ -238,13 +269,14 @@ Then `docker compose up -d --build tubetv`. Confirm the running build at
 survives) and rebuilds the container:
 
 ```sh
-./deploy.sh                    # pi@192.168.1.69
-./deploy.sh joao@192.168.1.69  # explicit user
+./deploy.sh                    # eddie@192.168.1.69
+./deploy.sh eddie@192.168.1.69 # explicit user
 ```
 
 It finishes by polling `/healthz` and fails loudly if the build is not the expected
-one. Give the Pi a DHCP reservation in the router: when its address changes, the
-TV's bookmark points at a dead host.
+one. If SSH still asks for a password, pass the same user the host actually uses:
+the Pi is `eddie@edberry5`, not `pi`/`joao`. Give the Pi a DHCP reservation in the
+router: when its address changes, the TV's bookmark points at a dead host.
 
 Serves on **port 8484** (`TUBETV_PORT=9000 docker compose up -d` to change). The
 container downloads the matching `yt-dlp` for its architecture at build time and
@@ -332,7 +364,7 @@ copies bytes — so CPU stays flat:
 | RAM | 100–135 MB | same |
 
 Resolution is the one slow step, so it no longer uses yt-dlp for normal playback.
-Build `2026-11-06.6` asks YouTube's **VISIONOS player client** for the HLS master
+The current build (`2026-11-06.7`) asks YouTube's **VISIONOS player client** for the HLS master
 directly: one InnerTube `player` request plus one master playlist fetch, measured at
 **0.1–0.5 s** for a VOD and **~0.08–0.1 s** for a livestream even on the Pi. VISIONOS
 only needs a visitor id (taken for free from the feed that is already loaded), not the
@@ -422,7 +454,7 @@ TV), so budget ~2× the video bitrate. Gigabit ethernet is plenty.
   YouTube's continuation tokens. If YouTube has nothing new, the grid simply stops.
 - Comments are read-only (no posting or voting), and come from YouTube's web surface
   while the feeds use the TV one.
-- No Shorts, no channel pages, no casting.
+- No Shorts, no casting.
 - Unofficial: uses InnerTube and a public OAuth client. Google can change either at any time.
 - Automatic quality reaches **2160p** when the TV's `MediaSource` reports `vp09`
   support; otherwise it tops out at 1080p H.264. 1440p/2160p are VP9 only. If VP9

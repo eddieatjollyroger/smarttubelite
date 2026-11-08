@@ -25,12 +25,12 @@ import {
   jsRuntime as ytdlpJsRuntime,
   setLogger as setYtdlpLogger,
 } from './lib/ytdlp.js';
-import { page, grid, card, comment, esc, playerMarkup } from './lib/ui.js';
+import { page, grid, card, channelHead, comment, esc, playerMarkup } from './lib/ui.js';
 
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-06.6';
+const BUILD = '2026-11-06.7';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -46,6 +46,7 @@ const hlsTokens = new Map();
 // proved unreliable at fetching third-party images (and blanks them all when
 // its image cache is under pressure), while same-origin HTTP always works.
 const thumbCache = new Map();
+const imgCache = new Map();
 
 // Small in-memory ring buffer so the TV's behaviour can be inspected from a
 // Mac (`/logs`) or with `docker compose logs`, without SSHing around.
@@ -940,9 +941,12 @@ async function handle(req, res) {
   if (path === '/api/progress') {
     const force = url.searchParams.get('force') === '1';
     const debug = url.searchParams.get('debug') === '1';
+    // The player only needs the current video, which is always on the first
+    // history page. One page keeps a resume check cheap on the Pi.
+    const pages = Math.min(2, Math.max(1, Number(url.searchParams.get('pages')) || 2));
     if (!yt.signedIn()) return json(res, 200, { ok: true, signedIn: false, map: {} });
     try {
-      const map = await yt.progressMap({ force });
+      const map = await yt.progressMap({ force, pages });
       const out = {
         ok: true,
         signedIn: true,
@@ -1084,6 +1088,8 @@ async function handle(req, res) {
             title: info.title,
             hls: `/api/hls?u=${b64u(info.hls)}`,
             height: 0,
+            channel: info.channel || '',
+            channelId: info.channelId || '',
           });
         }
         if (prefetch) return json(res, 200, { ok: true, mode: 'mse', height: info.height });
@@ -1117,6 +1123,8 @@ async function handle(req, res) {
           audioName: info.audioName || '',
           heights: [...new Set(levels.map((v) => v.height))].sort((a, b) => b - a),
           mode: 'mse',
+          channel: info.channel || '',
+          channelId: info.channelId || '',
           resume: progressFor(id),
           track: makeTrackToken(id),
         });
@@ -1146,6 +1154,8 @@ async function handle(req, res) {
           title: info.title,
           hls: `/api/hls?u=${b64u(info.hls)}`,
           height: 0,
+          channel: info.channel || '',
+          channelId: info.channelId || '',
         });
       }
       if (prefetch) return json(res, 200, { ok: true, mode: 'split', height: info.height });
@@ -1175,6 +1185,8 @@ async function handle(req, res) {
         acodec: info.acodec || null,
         heights: info.heights || [],
         mode: 'split',
+        channel: info.channel || '',
+        channelId: info.channelId || '',
         resume: progressFor(id),
         track: makeTrackToken(id),
       });
@@ -1218,6 +1230,83 @@ async function handle(req, res) {
     }
   }
 
+  // --- channel metadata ---------------------------------------------------
+  // The player asks for the avatar/subscriber line after the first frame.
+  // `?info=1` skips the video list (the page-one cache still makes a later
+  // channel visit free).
+  if (path === '/api/channel') {
+    const id = url.searchParams.get('id') || '';
+    if (!/^UC[A-Za-z0-9_-]{22}$/.test(id)) return json(res, 400, { error: 'bad channel id' });
+    try {
+      const p = await yt.channelPage(id);
+      if (url.searchParams.get('info') === '1') return json(res, 200, { info: p.info });
+      return json(res, 200, {
+        info: p.info,
+        videos: p.videos,
+        token: p.token,
+      });
+    } catch (e) {
+      log('channel ERR', id, String(e.message).slice(0, 140));
+      return json(res, 502, { error: 'channel unavailable' });
+    }
+  }
+
+  // --- channel avatars ----------------------------------------------------
+  // VIDAA drops third-party images, so channel avatars are proxied same-origin
+  // like thumbnails. Only Google's image hosts are accepted.
+  if (path === '/api/img') {
+    const raw = url.searchParams.get('u') || '';
+    let u;
+    try {
+      u = new URL(raw);
+    } catch {
+      return json(res, 400, { error: 'bad url' });
+    }
+    if (
+      u.protocol !== 'https:' ||
+      !/^(yt3\.googleusercontent\.com|yt3\.ggpht\.com|i\.ytimg\.com|lh3\.googleusercontent\.com)$/.test(
+        u.hostname
+      )
+    ) {
+      return json(res, 400, { error: 'host not allowed' });
+    }
+    const key = u.href;
+    const hit = imgCache.get(key);
+    if (hit) {
+      res.writeHead(200, {
+        'content-type': hit.type,
+        'cache-control': 'public, max-age=86400',
+        'content-length': hit.length,
+      });
+      return res.end(hit.body);
+    }
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 8000);
+    try {
+      const up = await fetch(key, {
+        headers: { 'user-agent': UA },
+        signal: ac.signal,
+      });
+      clearTimeout(timer);
+      if (!up.ok) return json(res, 404, { error: 'image unavailable' });
+      const type = String(up.headers.get('content-type') || 'image/jpeg');
+      if (!/^image\//i.test(type)) return json(res, 404, { error: 'not an image' });
+      const body = Buffer.from(await up.arrayBuffer());
+      if (!body.length) return json(res, 404, { error: 'empty image' });
+      if (imgCache.size > 300) imgCache.clear();
+      imgCache.set(key, { type, body, length: body.length });
+      res.writeHead(200, {
+        'content-type': type,
+        'cache-control': 'public, max-age=86400',
+        'content-length': body.length,
+      });
+      return res.end(body);
+    } catch (e) {
+      clearTimeout(timer);
+      return json(res, 502, { error: 'image fetch failed' });
+    }
+  }
+
   // --- comments ----------------------------------------------------------
   if (path === '/api/comments') {
     const id = url.searchParams.get('id') || '';
@@ -1242,15 +1331,23 @@ async function handle(req, res) {
     const kind = url.searchParams.get('kind') || 'home';
     let token = url.searchParams.get('token') || '';
     const refresh = url.searchParams.get('refresh') === '1';
+    const channelId = url.searchParams.get('channel') || '';
     if (!token && !refresh) return json(res, 400, { error: 'missing token' });
+    if (kind === 'channel' && !/^UC[A-Za-z0-9_-]{22}$/.test(channelId)) {
+      return json(res, 400, { error: 'bad channel' });
+    }
 
     const browseId = { home: 'FEwhat_to_watch', subs: 'FEsubscriptions', history: 'FEhistory' }[kind];
-    if (!browseId && kind !== 'search') return json(res, 400, { error: 'bad kind' });
+    if (!browseId && kind !== 'search' && kind !== 'channel') {
+      return json(res, 400, { error: 'bad kind' });
+    }
     if (refresh && kind === 'search') return json(res, 400, { error: 'cannot refresh search' });
     const fetchPage = (tok) =>
       kind === 'search'
         ? yt.searchPage(null, tok)
-        : yt.browsePage(browseId, tok, { skipShorts: kind === 'home' });
+        : kind === 'channel'
+          ? yt.channelPage(channelId, tok)
+          : yt.browsePage(browseId, tok, { skipShorts: kind === 'home' });
 
     // A TV keeps the grid open for hours; YouTube's page-tail continuation
     // token eventually goes stale. Fetch a fresh first page and return the
@@ -1258,9 +1355,12 @@ async function handle(req, res) {
     // dead end. Search needs its query, which continuation requests do not
     // carry, so only the browse feeds can recover this way.
     const freshNext = async () => {
-      const first = await yt.browsePage(browseId, null, {
-        skipShorts: kind === 'home',
-      });
+      const first =
+        kind === 'channel'
+          ? await yt.channelPage(channelId)
+          : await yt.browsePage(browseId, null, {
+              skipShorts: kind === 'home',
+            });
       if (!first.token) return null;
       const next = await fetchPage(first.token);
       log('more refresh', kind, `${next.videos.length}v`);
@@ -1384,6 +1484,37 @@ async function handle(req, res) {
          </div>
          <script>${LOGIN_JS}</script>`;
     return html(res, 200, page({ title: 'Sign in', body, active: '', signedIn }));
+  }
+
+  if (path === '/channel') {
+    const id = url.searchParams.get('id') || '';
+    if (!/^UC[A-Za-z0-9_-]{22}$/.test(id)) {
+      return errorPage(res, new Error('Bad channel id'), 400);
+    }
+    let p;
+    try {
+      p = await yt.channelPage(id);
+    } catch (e) {
+      log('channel page ERR', id, String(e.message).slice(0, 140));
+      return errorPage(res, new Error('Could not load this channel.'), 502);
+    }
+    yt.warmProgress();
+    const body = `${channelHead(p.info)}${grid(p.videos.slice(0, 60), {
+      kind: 'channel',
+      token: p.token,
+      channel: id,
+    })}`;
+    return html(
+      res,
+      200,
+      page({
+        title: (p.info && p.info.title) || 'Channel',
+        body,
+        active: '',
+        signedIn: yt.signedIn(),
+        ytProgress: yt.progressCached(),
+      })
+    );
   }
 
   if (path === '/watch') {
