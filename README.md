@@ -89,8 +89,10 @@ it uses the same player script.
 
 Holding OK on a tile for about 0.7 s opens a small menu with **Go to channel**,
 **Play video** and **Cancel**; a normal short press still opens the video
-immediately, so nothing gets slower. The menu only appears for tiles whose channel
-id is known (the TV, search and related feeds all carry it). Back closes the menu
+immediately, so nothing gets slower. The OK repeats that a held remote sends are
+ignored until the key is released, so opening the menu can never also open the
+video. The menu appears for every tile whose channel id is known — the home
+feed, channel pages, search and related feeds all carry it. Back closes the menu
 and puts focus back on the same tile.
 
 A channel page (`/channel?id=UC…`) opens YouTube's **Videos** tab through the web
@@ -100,8 +102,8 @@ a two-line description; below it are the channel's videos, loaded 30 at a time a
 you reach the bottom. Avatars are proxied through `/api/img` for the same reason as
 thumbnails — VIDAA's browser drops third-party images.
 
-While a video is playing, a compact channel row sits at the right end of the
-player's button row — the same height as the Quality/Comments/Suggested buttons,
+While a video is playing — including a livestream — a compact channel row sits at
+the right end of the player's button row — the same height as the Quality/Comments/Suggested buttons,
 so it adds no vertical space. It carries the same avatar, channel name and
 subscriber count. It is fetched after the first frame (so it never delays startup)
 and is cached for the rest of the session. OK on that row saves the current
@@ -368,7 +370,7 @@ copies bytes — so CPU stays flat:
 | RAM | 100–135 MB | same |
 
 Resolution is the one slow step, so it no longer uses yt-dlp for normal playback.
-The current build (`2026-11-08.1`) asks YouTube's **VISIONOS player client** for the HLS master
+The current build (`2026-11-08.2`) asks YouTube's **VISIONOS player client** for the HLS master
 directly: one InnerTube `player` request plus one master playlist fetch, measured at
 **0.1–0.5 s** for a VOD and **~0.08–0.1 s** for a livestream even on the Pi. VISIONOS
 only needs a visitor id (taken for free from the feed that is already loaded), not the
