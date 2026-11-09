@@ -30,7 +30,7 @@ import { page, grid, card, channelHead, comment, esc, playerMarkup } from './lib
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-08.2';
+const BUILD = '2026-11-08.3';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -47,6 +47,9 @@ const hlsTokens = new Map();
 // its image cache is under pressure), while same-origin HTTP always works.
 const thumbCache = new Map();
 const imgCache = new Map();
+// Video id -> channel identity. Used by the long-press menu when the feed
+// surface did not carry a channel id (the signed-in TV home feed, mostly).
+const chanOfCache = new Map();
 
 // Small in-memory ring buffer so the TV's behaviour can be inspected from a
 // Mac (`/logs`) or with `docker compose logs`, without SSHing around.
@@ -1227,6 +1230,42 @@ async function handle(req, res) {
     } catch (e) {
       log('related ERR', id, String(e.message).slice(0, 140));
       return json(res, 502, { error: 'suggestions unavailable', videos: [] });
+    }
+  }
+
+  // --- channel of a video --------------------------------------------------
+  // The signed-in TV home feed nests its channel link where the card renderer
+  // cannot see it, so the long-press menu asks for the channel when OK goes
+  // down. VISIONOS carries it in videoDetails; a full resolve is the fallback.
+  if (path === '/api/channel-of') {
+    const id = url.searchParams.get('id') || '';
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return json(res, 400, { error: 'bad video id' });
+    const hit = chanOfCache.get(id);
+    if (hit && Date.now() - hit.at < 12 * 60 * 60 * 1000) return json(res, 200, hit.data);
+    const rememberChannelOf = (data) => {
+      chanOfCache.set(id, { at: Date.now(), data });
+      // Bound the map on a device that runs for weeks.
+      if (chanOfCache.size > 1000) {
+        const oldest = chanOfCache.keys().next().value;
+        if (oldest) chanOfCache.delete(oldest);
+      }
+      return json(res, 200, data);
+    };
+    try {
+      const info = await yt.visionosHls(id);
+      const data = { channelId: info.channelId || '', channel: info.author || '' };
+      if (!data.channelId) throw new Error('no channel id');
+      return rememberChannelOf(data);
+    } catch (e) {
+      try {
+        const info = await resolveHlsStream(id, { height: 720, timeoutMs: 6000 });
+        const data = { channelId: info.channelId || '', channel: info.channel || '' };
+        if (!data.channelId) throw new Error('no channel id');
+        return rememberChannelOf(data);
+      } catch (e2) {
+        log('channel-of ERR', id, String(e2.message || e.message || '').slice(0, 120));
+        return json(res, 200, { channelId: '', channel: '' });
+      }
     }
   }
 

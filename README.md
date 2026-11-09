@@ -91,9 +91,9 @@ Holding OK on a tile for about 0.7 s opens a small menu with **Go to channel**,
 **Play video** and **Cancel**; a normal short press still opens the video
 immediately, so nothing gets slower. The OK repeats that a held remote sends are
 ignored until the key is released, so opening the menu can never also open the
-video. The menu appears for every tile whose channel id is known — the home
-feed, channel pages, search and related feeds all carry it. Back closes the menu
-and puts focus back on the same tile.
+video. The menu appears on every tile: where a feed does not carry the channel id
+(the signed-in TV home feed is one), the player looks it up from the video as soon
+as the hold starts. Back closes the menu and puts focus back on the same tile.
 
 A channel page (`/channel?id=UC…`) opens YouTube's **Videos** tab through the web
 `browse` surface, because the TV surface does not expose the avatar or subscriber
@@ -370,7 +370,7 @@ copies bytes — so CPU stays flat:
 | RAM | 100–135 MB | same |
 
 Resolution is the one slow step, so it no longer uses yt-dlp for normal playback.
-The current build (`2026-11-08.2`) asks YouTube's **VISIONOS player client** for the HLS master
+The current build (`2026-11-08.3`) asks YouTube's **VISIONOS player client** for the HLS master
 directly: one InnerTube `player` request plus one master playlist fetch, measured at
 **0.1–0.5 s** for a VOD and **~0.08–0.1 s** for a livestream even on the Pi. VISIONOS
 only needs a visitor id (taken for free from the feed that is already loaded), not the
