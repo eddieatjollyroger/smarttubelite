@@ -88,6 +88,7 @@
   var resumePct = 0;
   var resumedTo = 0;
   var resumeTries = 0;
+  var resumeSince = 0;
   var pctTimer = null;
   var lastPosSave = 0;
   var localPos = false;
@@ -1930,6 +1931,8 @@
     resumeFrom = Math.round(pos);
     resumeAt = resumeFrom;
     resumedTo = resumeFrom;
+    resumeTries = 0;
+    resumeSince = Date.now();
     resumeSource = source || '';
   }
 
@@ -1938,6 +1941,7 @@
     resumePct = 0;
     resumedTo = 0;
     resumeTries = 0;
+    resumeSince = 0;
     localPos = false;
     resumeSource = '';
     try {
@@ -2031,10 +2035,19 @@
         return;
       }
     }
-    if (resumeTries >= 5) {
+    // hls.js attaches its MediaSource late on the Pi; on a slow start the
+    // element can reject the seek across several canplay/playing events before
+    // the stream is seekable. Counting events (the old limit of 5) therefore
+    // abandoned valid resumes, and the video played from 0:00 while the grid
+    // still showed a progress bar. Use a deadline instead: retry for a bounded
+    // start-up window, with a high attempt cap as a runaway guard.
+    if (!resumeSince) resumeSince = Date.now();
+    if (Date.now() - resumeSince > 30000 || resumeTries >= 40) {
       resumeAt = 0;
       resumeFrom = 0;
       resumedTo = 0;
+      resumeTries = 0;
+      resumeSince = 0;
       return;
     }
     resumeTries++;
@@ -2048,6 +2061,7 @@
     resumePct = 0;
     resumedTo = 0;
     resumeTries = 0;
+    resumeSince = 0;
     if (pctTimer) { clearTimeout(pctTimer); pctTimer = null; }
   }
 
@@ -2118,6 +2132,7 @@
     resumePct = 0;
     resumedTo = 0;
     resumeTries = 0;
+    resumeSince = 0;
     if (pctTimer) { clearTimeout(pctTimer); pctTimer = null; }
     lastPosSave = 0;
     localPos = false;
