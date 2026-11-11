@@ -2378,6 +2378,7 @@
       unmute();
       hint('Sound on');
       chrome();
+      focusBtn(0);
       return;
     }
 
@@ -2447,7 +2448,21 @@
     if (isLeft(c, k)) { e.preventDefault(); seekByKey(-1); return; }
     if (isRight(c, k)) { e.preventDefault(); seekByKey(1); return; }
 
-    if (isOk(c, k) || k === ' ' || k === 'Spacebar' || c === 32) {
+    // OK with the bar hidden reveals the controls and lands on the play/pause
+    // button instead of toggling playback. The old shortcut paused directly and
+    // left nothing focused, so the control bar's own focus rules then needed two
+    // more presses (focus the button, then activate it) before playback resumed.
+    // Paused with the bar hidden is the one case that still acts at once: there
+    // is no visible button to aim at, so the press means "carry on".
+    if (isOk(c, k)) {
+      e.preventDefault();
+      if (startBtn.style.display !== 'none') { startBtn.click(); return; }
+      if (v.paused) { toggle(); return; }
+      chrome();
+      focusBtn(0);
+      return;
+    }
+    if (k === ' ' || k === 'Spacebar' || c === 32) {
       e.preventDefault();
       toggle();
       return;

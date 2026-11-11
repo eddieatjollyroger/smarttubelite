@@ -59,7 +59,7 @@ YouTube player code is loaded, so there are no ads to block.
 |---|---|---|
 | ↑ ↓ | move between tiles / rows | show the control bar; hide it again |
 | ← → | move between tiles and nav links | seek ∓10 s, accelerating while held (bar hidden) / move between buttons |
-| OK / Enter | open the focused item; hold ~0.7 s for **Go to channel** | play/pause, or activate the focused button |
+| OK / Enter | open the focused item; hold ~0.7 s for **Go to channel** | show the control bar on the play/pause button (bar hidden); play/pause or activate the focused button (bar shown) |
 | Back / Backspace / Esc | previous page | close the end screen or panel, then the bar, then the grid |
 | Play/Pause | — | play / pause |
 | S | — | quality menu (same as the **Quality** button) |
