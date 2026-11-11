@@ -42,8 +42,8 @@ while [ "$i" -lt 20 ]; do
   if out=$(curl -fsS --max-time 5 "http://$HOST:8484/healthz" 2>/dev/null); then
     echo "$out"
     case "$out" in
-      *'"build":"2026-11-10.1"'*) echo "==> deployed"; exit 0 ;;
-      *) echo "!! health responded but the build is not 2026-11-10.1" >&2; exit 1 ;;
+      *'"build":"2026-11-10.2"'*) echo "==> deployed"; exit 0 ;;
+      *) echo "!! health responded but the build is not 2026-11-10.2" >&2; exit 1 ;;
     esac
   fi
 done
