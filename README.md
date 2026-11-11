@@ -210,8 +210,11 @@ muted (always allowed) and one OK press turns the sound on.
 Grid thumbnails are proxied by the Pi (`/api/thumb`) instead of loading from
 `i.ytimg.com`. VIDAA's browser proved unreliable at third-party images and blanked
 the whole grid, and same-origin HTTP avoids YouTube's signed thumbnail URLs as well
-as DNS/TLS surprises. The proxy caches JPEGs in memory and steps from `hq720` down
-to `mqdefault` if a large one is unavailable.
+as DNS/TLS surprises. The proxy caches JPEGs in memory. Grid tiles ask for
+`q=sd` (640x480, already wider than a tile) and step down through `hq720` to
+`mqdefault` when a variant is missing; the player's suggested list keeps `hq720`.
+The big variant used to make the TV drop frames as each row scrolled in, because
+four 1280x720 JPEGs were being decoded to fill ~455 px wide tiles.
 
 If something pauses the stream on its own (the browser's autoplay policy, a stalled
 fragment, a decoder reset) the player resumes it, the way a set-top box does. It
@@ -495,6 +498,20 @@ decoder, so parallel tests lie):
 | 8 | video+audio pair | the exact element layout the player uses |
 
 Results are also posted to the server log line by line, so a hang still leaves a trace.
+
+The top of `/diag` also carries a **row switch test**: Sticky header and Card zoom
+can be switched off independently (the choice persists in `localStorage`). Every
+up/down move that scrolls then writes a line to `/logs`:
+
+```
+perf move down dy=386 first=2 max=19 slow=0 gaps=19,9,17 sticky=1 scale=1
+```
+
+`first` is the delay from the keypress to the first frame that shows the new scroll
+position, `max`/`slow`/`gaps` describe the frames after it, and the last two fields
+record which switches were active. `first` or a gap above ~50 ms is a visible
+hitch; comparing the four combinations says whether sticky positioning, the focus
+zoom or the tile painting is responsible.
 
 A very specific failure worth knowing: `TIMEOUT t=0.0 rs=4 ... paused=false` means the
 browser downloaded the stream, read the metadata and *still* never advanced the clock.

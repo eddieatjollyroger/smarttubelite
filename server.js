@@ -30,7 +30,7 @@ import { page, grid, card, channelHead, comment, esc, playerMarkup } from './lib
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-10.2';
+const BUILD = '2026-11-11.2';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -613,6 +613,46 @@ async function handle(req, res) {
 
   if (path === '/diag') {
     const body = `<h1>TV diagnostics</h1>
+      <h2>Row switch test</h2>
+      <p class="hint">Turn things off one at a time, then press Back and move up/down
+      through the grid. Each move is timed and written to the log; open
+      <code>/logs</code> afterwards.</p>
+      <p><button class="btn" style="border:0;font:inherit;color:inherit;cursor:pointer" data-fx="sticky">Sticky header</button>
+      <button class="btn" style="border:0;font:inherit;color:inherit;cursor:pointer" data-fx="scale">Card zoom</button>
+      <a class="btn" href="/">Back to grid</a></p>
+      <p class="hint" id="fxstate"></p>
+      <script>
+      (function () {
+        var KEY = 'tubetv.rowfx';
+        function load() {
+          try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { return {}; }
+        }
+        function show() {
+          var f = load();
+          var s = ['sticky header: ' + (f.sticky === false ? 'OFF' : 'ON'),
+                   'card zoom: ' + (f.scale === false ? 'OFF' : 'ON')];
+          document.getElementById('fxstate').textContent = s.join(' · ');
+          var b = document.querySelectorAll('[data-fx]');
+          for (var i = 0; i < b.length; i++) {
+            var k = b[i].getAttribute('data-fx');
+            b[i].textContent = (k === 'sticky' ? 'Sticky header: ' : 'Card zoom: ') +
+              (f[k] === false ? 'OFF' : 'ON');
+          }
+        }
+        document.addEventListener('click', function (e) {
+          var el = e.target;
+          while (el && el !== document && !(el.getAttribute && el.getAttribute('data-fx'))) el = el.parentNode;
+          if (!el || el === document || !el.getAttribute) return;
+          var k = el.getAttribute('data-fx');
+          var f = load();
+          f[k] = f[k] === false ? true : false;
+          try { localStorage.setItem(KEY, JSON.stringify(f)); } catch (e2) {}
+          show();
+        });
+        show();
+      })();
+      </script>
+      <h2>Playback test</h2>
       <p class="hint">Runs playback tests in this TV's browser. Takes about 40 seconds. When it finishes, open <code>/logs</code> to send me the results.</p>
       <pre id="out" class="diagout">starting…</pre>
       <div id="videos" class="diagvideos"></div>
@@ -800,10 +840,17 @@ async function handle(req, res) {
 
   // Grid thumbnails. Same-origin, so the TV never has to reach i.ytimg.com and
   // does not depend on YouTube's signed ?sqp= URLs staying valid.
+  //
+  // q=sd (640x480) is for the grid. A tile is ~455 CSS px wide, so hq720
+  // (1280x720) was decoded at 3x the pixels needed; four of those entering the
+  // viewport on a row switch is what made the TV drop frames while scrolling.
+  // sddefault's 60 px letterbox bars are cropped away by object-fit: cover.
+  // The player keeps hq720.
   if (path === '/api/thumb') {
     const id = url.searchParams.get('id') || '';
     if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return json(res, 400, { error: 'bad video id' });
-    const wanted = url.searchParams.get('q') === 'mqdefault' ? 'mqdefault' : 'hq720';
+    const q = url.searchParams.get('q');
+    const wanted = q === 'mqdefault' ? 'mqdefault' : q === 'sd' ? 'sddefault' : 'hq720';
     const key = id + '/' + wanted;
     const hit = thumbCache.get(key);
     if (hit) {
@@ -814,7 +861,14 @@ async function handle(req, res) {
       });
       return res.end(hit);
     }
-    const variants = wanted === 'hq720' ? ['hq720', 'mqdefault'] : ['mqdefault'];
+    // Shorts and some old uploads have no sddefault/hq720; step down rather
+    // than 404, so the tile always shows something.
+    const variants =
+      wanted === 'sddefault'
+        ? ['sddefault', 'hq720', 'mqdefault']
+        : wanted === 'hq720'
+          ? ['hq720', 'sddefault', 'mqdefault']
+          : ['mqdefault'];
     for (const v of variants) {
       const ac = new AbortController();
       const timer = setTimeout(() => ac.abort(), 8000);
