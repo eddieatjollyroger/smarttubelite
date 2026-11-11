@@ -99,8 +99,13 @@ A channel page (`/channel?id=UC…`) opens YouTube's **Videos** tab through the 
 `browse` surface, because the TV surface does not expose the avatar or subscriber
 count. The header shows the avatar, name, handle, subscriber count, video count and
 a two-line description; below it are the channel's videos, loaded 30 at a time as
-you reach the bottom. Avatars are proxied through `/api/img` for the same reason as
-thumbnails — VIDAA's browser drops third-party images.
+you reach the bottom. Streams that are live right now come first, with a red
+**LIVE** badge, taken from the channel's **Live** tab: the Videos tab sorts them by
+start date, so a long-running stream can sit far below newer uploads — which is
+what makes a second concurrent stream of the same event hard to find. Both tabs are
+requested together, and a channel without live streams is unaffected. Avatars are
+proxied through `/api/img` for the same reason as thumbnails — VIDAA's browser
+drops third-party images.
 
 While a video is playing — including a livestream — a compact channel row sits at
 the right end of the player's button row — the same height as the Quality/Comments/Suggested buttons,
