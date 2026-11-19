@@ -30,7 +30,7 @@ import { page, grid, card, channelHead, comment, esc, playerMarkup } from './lib
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-12.1';
+const BUILD = '2026-11-19.2';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -50,6 +50,10 @@ const imgCache = new Map();
 // Video id -> channel identity. Used by the long-press menu when the feed
 // surface did not carry a channel id (the signed-in TV home feed, mostly).
 const chanOfCache = new Map();
+// SponsorBlock is a nice-to-have: the TV must never wait on a third party to
+// start a video. Segments are cached briefly and failures become empty lists.
+const sbCache = new Map();
+const sbBusy = new Map();
 
 // Small in-memory ring buffer so the TV's behaviour can be inspected from a
 // Mac (`/logs`) or with `docker compose logs`, without SSHing around.
@@ -118,6 +122,61 @@ function json(res, status, obj) {
     'content-length': Buffer.byteLength(body),
   });
   res.end(body);
+}
+
+// SponsorBlock's public read API. Only "skip" actions are used; chapters and
+// "filler" are left alone so the viewer never loses a useful bit of a video.
+// 404 means "no segments", not an error. Data is CC BY-NC-SA 4.0 (credited in
+// the README and in the API response).
+const SB_CATEGORIES = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro',
+  'preview', 'hook', 'exclusive_access'];
+async function fetchSponsorSegments(id) {
+  const hit = sbCache.get(id);
+  if (hit && Date.now() - hit.at < hit.ttl) return hit.segments;
+  if (sbBusy.has(id)) return sbBusy.get(id);
+  const job = (async () => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 6000);
+    try {
+      const u = new URL('https://sponsor.ajay.app/api/skipSegments');
+      u.searchParams.set('videoID', id);
+      u.searchParams.set('categories', JSON.stringify(SB_CATEGORIES));
+      u.searchParams.set('actionTypes', JSON.stringify(['skip']));
+      const up = await fetch(u, {
+        headers: { 'user-agent': UA, 'x-client-name': 'tubetv' },
+        signal: ac.signal,
+      });
+      if (up.status === 404) {
+        sbCache.set(id, { at: Date.now(), ttl: 2 * 60 * 1000, segments: [] });
+        return [];
+      }
+      if (!up.ok) throw new Error('sponsorblock ' + up.status);
+      const rows = await up.json();
+      const segments = (Array.isArray(rows) ? rows : [])
+        .filter((s) => s && Array.isArray(s.segment) && s.segment.length === 2 &&
+          (!s.actionType || s.actionType === 'skip') &&
+          SB_CATEGORIES.indexOf(s.category) >= 0)
+        .map((s) => ({ segment: [Number(s.segment[0]), Number(s.segment[1])],
+          category: s.category, UUID: String(s.UUID || '') }))
+        .filter((s) => isFinite(s.segment[0]) && isFinite(s.segment[1]) &&
+          s.segment[1] > s.segment[0])
+        .sort((a, b) => a.segment[0] - b.segment[0]);
+      if (sbCache.size > 400) sbCache.clear();
+      sbCache.set(id, { at: Date.now(), ttl: 10 * 60 * 1000, segments });
+      return segments;
+    } catch (e) {
+      // A timeout or an upstream 5xx is not "no segments" — retry sooner, but
+      // still keep playback moving with an empty list.
+      sbCache.set(id, { at: Date.now(), ttl: 30 * 1000, segments: [] });
+      log('sponsorblock ERR', id, String(e.message).slice(0, 120));
+      return [];
+    } finally {
+      clearTimeout(timer);
+      sbBusy.delete(id);
+    }
+  })();
+  sbBusy.set(id, job);
+  return job;
 }
 
 function html(res, status, body) {
@@ -896,6 +955,22 @@ async function handle(req, res) {
     return json(res, 404, { error: 'no thumbnail' });
   }
 
+  // App-tile icon. The TV's installer (hisense://debug or Sidee app_install)
+  // fetches it once at install time, so a stable same-origin URL is enough.
+  if (path === '/icon.png') {
+    try {
+      const buf = fs.readFileSync(new URL('./public/icon.png', import.meta.url));
+      res.writeHead(200, {
+        'content-type': 'image/png',
+        'cache-control': 'public, max-age=86400',
+        'content-length': buf.length,
+      });
+      return res.end(buf);
+    } catch {
+      return json(res, 404, { error: 'icon.png missing' });
+    }
+  }
+
   // hls.js, served locally so the TV doesn't need internet for the player.
   if (path === '/player.js') {
     try {
@@ -984,10 +1059,11 @@ async function handle(req, res) {
     return json(res, 200, {
       name: 'TubeTV',
       short_name: 'TubeTV',
-      start_url: '/',
+      start_url: '/?resume=1',
       display: 'fullscreen',
       background_color: '#0b0b0c',
       theme_color: '#0b0b0c',
+      icons: [{ src: '/icon.png', sizes: '192x192', type: 'image/png' }],
     });
   }
 
@@ -1342,6 +1418,19 @@ async function handle(req, res) {
       log('channel ERR', id, String(e.message).slice(0, 140));
       return json(res, 502, { error: 'channel unavailable' });
     }
+  }
+
+  // --- SponsorBlock segments ---------------------------------------------
+  // Same-origin and cached: the old TV browser does not need CORS or a direct
+  // internet call, and a slow/blocked API never holds up playback.
+  if (path === '/api/sponsorblock') {
+    const vid = url.searchParams.get('id') || '';
+    if (!/^[A-Za-z0-9_-]{11}$/.test(vid)) return json(res, 400, { error: 'bad video id' });
+    const segments = await fetchSponsorSegments(vid);
+    return json(res, 200, {
+      segments,
+      attribution: 'SponsorBlock data by the SponsorBlock community, CC BY-NC-SA 4.0',
+    });
   }
 
   // --- channel avatars ----------------------------------------------------

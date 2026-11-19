@@ -37,7 +37,21 @@ YouTube player code is loaded, so there are no ads to block.
 - Quality menu with every resolution this video offers; adaptive ABR by default,
   and an explicit pick pins that level for the current video. The next video starts
   in Automatic again, so one 4K/1440p pick is not forced on everything afterwards
-- Livestreams, played as HLS through a built-in relay (no native HLS required)
+- Livestreams, played as HLS through a built-in relay (no native HLS required).
+  The progress bar shows the whole live DVR window like a still-growing VOD, with
+  a pink tick at the broadcast edge. ←/→ rewind inside that window (or catch up
+  again), the clock shows how far behind live you are, and **GO LIVE** / `L` jumps
+  back to the edge. How far
+  back you can go is set by YouTube's sliding manifest (often 30 s to a few minutes),
+  not by TubeTV
+- Optional **SponsorBlock** skipping, via a cached same-origin proxy. Only `skip`
+  actions are honoured; chapters and "filler" are left alone. The toggle in the
+  control bar persists. SponsorBlock data is by the SponsorBlock community,
+  licensed [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+- Grid state survives full reloads: every feed remembers its scroll offset and
+  focused tile in `tubetv.nav`, so launching the app tile does not drop you back
+  at the first card. A tile URL with `?resume=1` also returns to the feed you were
+  last on
 - Remote-friendly UI: big tiles, arrow-key spatial navigation
 - Remembers where each video was left, resumes there on the next open (also via
   `/watch?id=…&t=<seconds>`), and paints YouTube's red watched bar under the tile on
@@ -58,7 +72,7 @@ YouTube player code is loaded, so there are no ads to block.
 | Key | Grid / search | Player |
 |---|---|---|
 | ↑ ↓ | move between tiles / rows | show the control bar; hide it again |
-| ← → | move between tiles and nav links | seek ∓10 s, accelerating while held (bar hidden) / move between buttons |
+| ← → | move between tiles and nav links | seek ∓10 s, accelerating while held (bar hidden); on live, rewind/catch up inside the DVR window / move between buttons |
 | OK / Enter | open the focused item; hold ~0.7 s for **Go to channel** | show the control bar on the play/pause button (bar hidden); play/pause or activate the focused button (bar shown) |
 | Back / Backspace / Esc | previous page | close the end screen or panel, then the bar, then the grid |
 | Play/Pause | — | play / pause |
@@ -68,6 +82,7 @@ YouTube player code is loaded, so there are no ads to block.
 | D | — | open `/diag` (works from any page) |
 | F | — | toggle fullscreen |
 | 0 | — | restart the video and forget its saved position |
+| L | — | on a livestream, jump back to the live edge (same as **GO LIVE**) |
 
 ## How playback starts
 
@@ -333,11 +348,29 @@ On Linux the yt-dlp binary must match the machine: replace `bin/yt-dlp` with
 > If it says `NOT RUNNABLE: spawn ... ENOEXEC` (or `Exec format error`) under
 > plain Node, you have the wrong architecture in `bin/yt-dlp`.
 
-Open the **TV** URL in the TV browser. On VIDAA:
+Open the **TV** URL in the TV browser. On VIDAA, install it as a real app tile so
+it launches straight from Home instead of living inside the browser:
 
-- VIDAA ≤ 4: browser → `hisense://debug` → App name `TubeTV`, App URL = the TV URL.
-- VIDAA 5–8: use [vidaa-edge](https://github.com/weinzii/vidaa-edge) to install it as a PWA,
-  or just bookmark the URL in the browser.
+- **Browser debug page** (works on the older VIDAA firmware): open the Browser app
+  and go to `hisense://debug`. Fill in:
+  - App Name: `TubeTV`
+  - App URL: `http://<pi>:8484/?resume=1`
+  - Thumbnail / Icon (optional, but use it): `http://<pi>:8484/icon.png`
+  - Press **Install**; the console should say `Installation COMPLETED!`
+- **Sidee** (same MQTT `app_install` route used for Jellyfin on this TV): register
+  `Id`/`mediaId` = `tubetv`, `Title` = `TubeTV`, `StoreType` = `99`, `URL` =
+  `http://<pi>:8484/?resume=1`, `Image` = `http://<pi>:8484/icon.png`.
+- After installing, open **Edit Home** and tick **TubeTV**; new tiles do not show
+  up on the dock until they are selected there.
+
+The `?resume=1` flag is only on the tile URL: it returns you to the last feed you
+were browsing. Normal links and a plain `http://<pi>:8484/` still open Home, but
+Home itself now remembers its scroll position and focused tile.
+
+On newer VIDAA versions the debug page can be password-gated; in that case use
+[vidaa-edge](https://github.com/weinzii/vidaa-edge) to install it as a PWA, or
+bookmark the URL in the browser. The app icon is also declared in
+`/manifest.webmanifest`, so a PWA install picks it up automatically.
 
 ## Sign in
 

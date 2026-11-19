@@ -21,14 +21,16 @@
   var prog = document.getElementById('prog');
   var progfill = document.getElementById('progfill');
   var playBtn = document.getElementById('ctlplay');
+  var liveBtn = document.getElementById('ctllive');
   var gearBtn = document.getElementById('ctlgear');
   var cmtBtn = document.getElementById('ctlcmt');
   var relBtn = document.getElementById('ctlrel');
+  var sponsorBtn = document.getElementById('ctlsp');
   var chanRow = document.getElementById('chanrow');
   var chanImg = document.getElementById('chanimg');
   var chanNameEl = document.getElementById('channame');
   var chanSubsEl = document.getElementById('chansubs');
-  var ctlBtns = [playBtn, gearBtn, cmtBtn, relBtn, chanRow];
+  var ctlBtns = [playBtn, liveBtn, gearBtn, cmtBtn, relBtn, sponsorBtn, chanRow];
   var panel = document.getElementById('panel');
   var panelTitle = document.getElementById('paneltitle');
   var panelBody = document.getElementById('panelbody');
@@ -50,6 +52,14 @@
   var lastClock = '';
   var started = false;
   var isLive = false;
+  // SponsorBlock: same-origin segments from /api/sponsorblock. A failed lookup
+  // simply leaves the list empty; it never holds up playback.
+  var sponsorOn = true;
+  var SB_CATS = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro',
+    'preview', 'hook', 'exclusive_access'];
+  var sponsors = [];
+  var sponsorsFor = '';
+  var skippedSegs = {};
   var curHeights = null;
   var hls = null;
   var hlsOff = false;
@@ -161,6 +171,14 @@
   function markSoundOn() {
     try { localStorage.setItem('tubetv.sound', '1'); } catch (e) {}
   }
+
+  // SponsorBlock can be turned off from the control bar. The choice survives
+  // a full page load, just like the viewer's sound preference.
+  try { sponsorOn = localStorage.getItem('tubetv.sb') !== '0'; } catch (e) {}
+  function syncSponsorLabel() {
+    if (sponsorBtn) sponsorBtn.textContent = sponsorOn ? 'Sponsor: on' : 'Sponsor: off';
+  }
+  syncSponsorLabel();
 
   // Highest quality first, then everything below it, then the split fallback.
   function makeTiers(top) {
@@ -436,10 +454,17 @@
   }
 
   function focusBtn(i) {
-    if (i < 0) i = 0;
-    if (i > ctlBtns.length - 1) i = ctlBtns.length - 1;
-    var b = ctlBtns[i];
-    if (b) b.focus();
+    var n = ctlBtns.length;
+    if (!n) return;
+    // GO LIVE is display:none on VOD and the channel row hides itself when
+    // there is no channel. Skip hidden buttons so Left/Right never lands on
+    // something the viewer cannot see.
+    for (var k = 0; k < n; k++) {
+      var idx = ((i % n) + n) % n;
+      var b = ctlBtns[idx];
+      if (b && b.offsetParent !== null) { try { b.focus(); } catch (e) {} return; }
+      i = idx + 1;
+    }
   }
 
   function syncPlayLabel() {
@@ -683,12 +708,15 @@
     started = true;
     isLive = !!live;
     liveRetries = 0;
+    if (live) { sponsors = []; sponsorsFor = ''; skippedSegs = {}; }
+    paintLive();
     // Resolutions came with /api/play, so the cogwheel can paint instantly
     // instead of waiting on another yt-dlp run.
     curHeights = (!live && info.heights && info.heights.length) ? info.heights : null;
     ttl.textContent = info.title || (live ? 'Live' : id);
     document.title = (info.title || (live ? 'Live' : 'TubeTV')) + ' · TubeTV';
-    prog.style.display = live ? 'none' : 'block';
+    prog.style.display = 'block';
+    prog.className = live ? 'prog live' : 'prog';
     if (live) hint('LIVE', 4000);
     v.muted = !hasGesture() && !wantsSound();
     report(live ? 'live-attach' : 'hls-attach', {
@@ -747,7 +775,10 @@
           // hls.js evicts old fragments as playback advances.
           maxBufferLength: 20,
           maxMaxBufferLength: 30,
-          backBufferLength: 30,
+          // hls.js 0.14 keeps live rewind in liveBackBufferLength (seconds);
+          // `backBufferLength` is not a key in this version and was ignored.
+          // Two minutes is enough for a live rewind without eating TV memory.
+          liveBackBufferLength: 120,
           maxBufferSize: 40 * 1000 * 1000,
           // Fetch the first fragment while the manifest is still settling;
           // saves a round trip on a cold start.
@@ -1004,10 +1035,156 @@
     hint('Quality: ' + h + 'p', 4000);
   }
 
-  function seek(delta) {
-    if (isLive) { hint('Live stream — no seeking', 3000); return; }
+  // --- live DVR window ---------------------------------------------------
+  // hls.js keeps a sliding window of live fragments in the media element's
+  // seekable ranges. Seeking inside that window works; seeking past its start
+  // (or past the edge) is clamped by the browser and lands nowhere. Reporting
+  // the distance to the edge also makes rewind visible on the clock.
+  function liveWindow() {
+    var lo = NaN, hi = NaN;
+    try {
+      if (v.seekable && v.seekable.length) {
+        lo = v.seekable.start(0);
+        hi = v.seekable.end(v.seekable.length - 1);
+      }
+    } catch (e) {}
+    if (!isFinite(lo) || !isFinite(hi) || !(hi > lo)) {
+      if (isFinite(v.duration) && v.duration > 0) { lo = 0; hi = v.duration; }
+      else return null;
+    }
+    return { start: lo, end: hi };
+  }
+  function liveEdge(w) {
+    // hls.js deliberately sits a few fragments back from the raw manifest
+    // edge (liveSyncDurationCount). That position is "live" from the viewer's
+    // point of view, so use it as the reference instead of seekable.end —
+    // otherwise every live stream would open showing "20s behind".
+    var edge = w ? w.end : NaN;
+    try {
+      if (hls && isFinite(hls.liveSyncPosition)) edge = hls.liveSyncPosition;
+    } catch (e) {}
+    return edge;
+  }
+  function behindLive() {
+    var w = liveWindow();
+    if (!w) return 0;
+    var edge = liveEdge(w);
+    if (!isFinite(edge)) return 0;
+    return Math.max(0, edge - (v.currentTime || 0));
+  }
+  function paintLive() {
+    if (!liveBtn) return;
+    if (!isLive) {
+      if (liveBtn.className.indexOf('hide') < 0) liveBtn.className = 'ctl hide';
+      return;
+    }
+    if (liveBtn.className.indexOf('hide') >= 0) liveBtn.className = 'ctl';
+    var behind = behindLive();
+    var label = behind > 2.5 ? 'GO LIVE (-' + Math.round(behind) + 's)' : 'LIVE';
+    if (liveBtn.textContent !== label) liveBtn.textContent = label;
+  }
+  function goLive() {
+    if (!isLive) return;
+    var target = liveEdge(liveWindow());
+    if (!isFinite(target)) { hint('Live edge unavailable', 2500); return; }
     clearResume();
     seekTarget = 0;
+    try { v.currentTime = target; } catch (e) {}
+    paintPos(target);
+    paintLive();
+    hint('Back to live', 2500);
+    chrome();
+    report('go-live', { to: Math.round(target) });
+  }
+
+  // --- SponsorBlock ------------------------------------------------------
+  function sponsorKey(s) {
+    return (s && s.UUID) ? s.UUID :
+      (s && s.segment ? s.segment[0] + '-' + s.segment[1] : '');
+  }
+  function sponsorLabel(cat) {
+    return ({ sponsor: 'Sponsor', selfpromo: 'Self promo', interaction: 'Interaction',
+      intro: 'Intro', outro: 'Outro', preview: 'Preview', hook: 'Hook',
+      exclusive_access: 'Exclusive' })[cat] || 'Segment';
+  }
+  function loadSponsors(vid) {
+    sponsors = [];
+    skippedSegs = {};
+    sponsorsFor = '';
+    if (!sponsorOn || isLive || !/^[A-Za-z0-9_-]{11}$/.test(vid)) return;
+    sponsorsFor = vid;
+    fetch('/api/sponsorblock?id=' + encodeURIComponent(vid), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || sponsorsFor !== vid) return;
+        sponsors = Array.isArray(j.segments) ? j.segments : [];
+        skippedSegs = {};
+        if (sponsors.length) report('sponsor-segments', { id: vid, n: sponsors.length });
+      })
+      .catch(function () {});
+  }
+  function checkSponsors() {
+    if (!sponsorOn || !sponsors.length || isLive || !active) return;
+    var t = v.currentTime || 0;
+    // A segment is skipped once per entry. Once the viewer moves clearly
+    // outside it (a deliberate rewind, or the next video section), clear the
+    // marker so walking back into it skips again like every SponsorBlock client.
+    var marked = Object.keys(skippedSegs);
+    for (var m = 0; m < marked.length; m++) {
+      var span = skippedSegs[marked[m]];
+      if (span && (t < span.from - 1 || t > span.to + 1)) delete skippedSegs[marked[m]];
+    }
+    for (var i = 0; i < sponsors.length; i++) {
+      var s = sponsors[i];
+      if (!s || !s.segment) continue;
+      // The proxy filters these already; keep a client-side guard so a stale
+      // or hand-edited response can never skip a chapter or a "filler" beat.
+      if (s.actionType && s.actionType !== 'skip') continue;
+      if (s.category && SB_CATS.indexOf(s.category) < 0) continue;
+      var key = sponsorKey(s);
+      if (skippedSegs[key]) continue;
+      var from = Number(s.segment[0]), to = Number(s.segment[1]);
+      if (!isFinite(from) || !isFinite(to) || !(to > from)) continue;
+      if (t < from - 0.15 || t >= to) continue;
+      var dest = to + 0.05;
+      if (isFinite(v.duration) && v.duration > 0) {
+        dest = Math.min(dest, Math.max(0, v.duration - 0.15));
+      }
+      skippedSegs[key] = { from: from, to: dest };
+      try { v.currentTime = dest; } catch (e) {}
+      if (a.src) { try { a.currentTime = dest; } catch (e2) {} }
+      hint('Skipped ' + sponsorLabel(s.category) + ' · SponsorBlock', 2800);
+      report('sponsor-skip', { id: id, cat: s.category,
+        from: Math.round(t), to: Math.round(dest) });
+      break;
+    }
+  }
+  function setSponsor(on) {
+    sponsorOn = !!on;
+    try { localStorage.setItem('tubetv.sb', sponsorOn ? '1' : '0'); } catch (e) {}
+    syncSponsorLabel();
+    if (!sponsorOn) { sponsors = []; skippedSegs = {}; sponsorsFor = ''; }
+    else if (active && id) loadSponsors(id);
+    hint(sponsorOn ? 'SponsorBlock on' : 'SponsorBlock off', 2500);
+    chrome();
+  }
+
+  function seek(delta) {
+    clearResume();
+    seekTarget = 0;
+    if (isLive) {
+      var w = liveWindow();
+      if (!w) { hint('Live window unavailable', 2500); return; }
+      var t = Math.max(w.start, Math.min(w.end, (v.currentTime || 0) + delta));
+      try { v.currentTime = t; } catch (e) {}
+      paintPos(t);
+      paintLive();
+      var behind = Math.max(0, w.end - t);
+      hint(behind > 2.5 ? '−' + Math.round(behind) + 's behind live' : 'LIVE', 2500);
+      chrome();
+      report('live-seek', { delta: delta, to: Math.round(t) });
+      return;
+    }
     try {
       v.currentTime = Math.max(0, v.currentTime + delta);
       if (a.src) a.currentTime = v.currentTime;
@@ -1022,7 +1199,8 @@
   // ~5 s and 480 s after ~8 s. The direction timer resets after 0.7 s of no
   // key, so two separate taps never inherit an old multiplier.
   function seekByKey(dir) {
-    if (isLive) { hint('Live stream — no seeking', 3000); return; }
+    var win = isLive ? liveWindow() : null;
+    if (isLive && !win) { hint('Live window unavailable', 2500); return; }
     var now = Date.now();
     if (dir !== seekDir || now - seekLastAt > 700) {
       seekDir = dir;
@@ -1043,8 +1221,12 @@
     // from the pending target, otherwise every repeat reads the same old
     // currentTime and the player only jumps 10 s no matter how long you hold.
     var base = seekTarget > 0 ? seekTarget : (v.currentTime || 0);
-    var target = Math.max(0, base + dir * step);
-    if (isFinite(v.duration) && v.duration > 0) {
+    var target = Math.max(win ? win.start : 0, base + dir * step);
+    if (win) {
+      // Inside a live DVR window the edge moves while the viewer rewinds, so
+      // clamp against the range we just measured rather than stale duration.
+      target = Math.min(target, win.end);
+    } else if (isFinite(v.duration) && v.duration > 0) {
       target = Math.min(target, Math.max(0, v.duration - 2));
     }
     seekTarget = target;
@@ -1053,7 +1235,10 @@
     // Repeated keydowns can outpace the media element's seek; preview the
     // accumulated target immediately instead of waiting for timeupdate.
     paintPos(target);
-    hint((dir > 0 ? '+' : '-') + step + 's · ' + fmt(target), 2500);
+    paintLive();
+    hint((dir > 0 ? '+' : '-') + step + 's · ' +
+      (win ? '−' + Math.round(Math.max(0, win.end - target)) + 's live'
+           : fmt(target)), 2500);
     chrome();
   }
 
@@ -1466,7 +1651,8 @@
     if (!isFinite(p) || p < 0) p = 0;
     var s;
     if (isLive) {
-      s = 'LIVE';
+      var behind = behindLive();
+      s = behind > 2.5 ? '−' + Math.round(behind) + 's behind' : 'LIVE';
     } else if (!isFinite(v.duration) || v.duration <= 0) {
       s = fmt(p);
     } else {
@@ -1476,14 +1662,31 @@
       lastClock = s;
       clock.textContent = s;
     }
-    if (!isLive && isFinite(v.duration) && v.duration > 0 && progfill) {
-      progfill.style.width = Math.min(100, (p / v.duration) * 100).toFixed(2) + '%';
+    if (progfill) {
+      if (isLive) {
+        // TizenTube-style live bar: the whole DVR window is the timeline, from
+        // the oldest seekable fragment on the left to the broadcast edge on
+        // the right. It keeps widening as YouTube slides the manifest along,
+        // so a live stream reads like a VOD that is still being recorded.
+        var win = liveWindow();
+        var edge = liveEdge(win);
+        if (win && isFinite(edge) && edge > win.start) {
+          var at = Math.max(win.start, Math.min(edge, p));
+          progfill.style.width = (((at - win.start) / (edge - win.start)) * 100).toFixed(2) + '%';
+        } else {
+          progfill.style.width = '0%';
+        }
+      } else if (isFinite(v.duration) && v.duration > 0) {
+        progfill.style.width = Math.min(100, (p / v.duration) * 100).toFixed(2) + '%';
+      }
     }
   }
 
   function updateClock() {
     var seeking = seekLastAt && Date.now() - seekLastAt < 700;
     paintPos(seeking ? seekTarget : (v.currentTime || 0));
+    paintLive();
+    if (!seeking) checkSponsors();
     if (started && v.readyState >= 2 && isFinite(v.duration) && v.duration > 0) {
       lastTime = v.currentTime || 0;
     }
@@ -1520,6 +1723,7 @@
     if (resumePct > 0 && resumeAt <= 1) scheduleResumePct();
   });
   v.addEventListener('seeked', function () {
+    checkSponsors();
     if (resumeAt > 1 && Math.abs((v.currentTime || 0) - resumeAt) < 5) {
       resumeAt = 0;
       resumeFrom = 0;
@@ -1771,6 +1975,8 @@
   // --- buttons ----------------------------------------------------------
   document.getElementById('back').addEventListener('click', function () { goBack(); });
   playBtn.addEventListener('click', toggle);
+  if (liveBtn) liveBtn.addEventListener('click', goLive);
+  if (sponsorBtn) sponsorBtn.addEventListener('click', function () { setSponsor(!sponsorOn); });
   gearBtn.addEventListener('click', function () { openPanel('quality'); });
   cmtBtn.addEventListener('click', function () { openPanel('comments'); });
   relBtn.addEventListener('click', function () { openPanel('related'); });
@@ -2183,6 +2389,7 @@
     // Resume where this TV stopped last time. A video within 30 s of the end
     // (or the first 30 s) starts over, as YouTube does. An explicit &t= wins.
     restorePosition(id2);
+    loadSponsors(id2);
     if (stage) stage.className = 'stage';
     document.body.classList.add('cinema');
     document.body.classList.add('watch-open');
@@ -2218,6 +2425,11 @@
     teardown();
     active = false;
     id = '';
+    prog.className = 'prog';
+    sponsors = [];
+    sponsorsFor = '';
+    skippedSegs = {};
+    paintLive();
     if (stage) {
       stage.className = 'stage hide';
       document.body.classList.remove('cinema');
@@ -2333,6 +2545,13 @@
       if (a.src) { try { a.currentTime = 0; } catch (err2) {} }
       hint('Restarted');
       chrome();
+      return;
+    }
+
+    // L jumps back to the live edge from anywhere in a rewind window.
+    if (!panelKind && isLive && (k === 'l' || k === 'L')) {
+      e.preventDefault();
+      goLive();
       return;
     }
 
@@ -2588,6 +2807,7 @@
         }
       } catch (e) {}
       restorePosition(id);
+      loadSponsors(id);
       resetChrome();
       stage = null;
       document.documentElement.style.overflow = 'hidden';
