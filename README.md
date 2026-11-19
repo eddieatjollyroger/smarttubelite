@@ -349,28 +349,34 @@ On Linux the yt-dlp binary must match the machine: replace `bin/yt-dlp` with
 > plain Node, you have the wrong architecture in `bin/yt-dlp`.
 
 Open the **TV** URL in the TV browser. On VIDAA, install it as a real app tile so
-it launches straight from Home instead of living inside the browser:
+it launches straight from Home instead of living inside the browser.
 
-- **Browser debug page** (works on the older VIDAA firmware): open the Browser app
-  and go to `hisense://debug`. Fill in:
-  - App Name: `TubeTV`
-  - App URL: `http://<pi>:8484/?resume=1`
-  - Thumbnail / Icon (optional, but use it): `http://<pi>:8484/icon.png`
-  - Press **Install**; the console should say `Installation COMPLETED!`
-- **Sidee** (same MQTT `app_install` route used for Jellyfin on this TV): register
-  `Id`/`mediaId` = `tubetv`, `Title` = `TubeTV`, `StoreType` = `99`, `URL` =
-  `http://<pi>:8484/?resume=1`, `Image` = `http://<pi>:8484/icon.png`.
-- After installing, open **Edit Home** and tick **TubeTV**; new tiles do not show
-  up on the dock until they are selected there.
+This firmware's app installer rejects plain `http://` app URLs. They register as
+`HTTP_APP_DEFAULT_URL<id>` rather than the real address — the same thing that
+happens to a local Jellyfin tile. Its HTTPS tiles, such as the Stremio preset,
+store the real URL. Keep the Pi on HTTP, but give the launcher an HTTPS URL that
+redirects to the Pi:
 
-The `?resume=1` flag is only on the tile URL: it returns you to the last feed you
-were browsing. Normal links and a plain `http://<pi>:8484/` still open Home, but
-Home itself now remembers its scroll position and focused tile.
+1. Upload `tools/tile-redirect/index.html` and `tools/tile-redirect/icon.png` to
+   any trusted HTTPS host (GitHub Pages, a Cloudflare Worker, etc.).
+2. Register the tile with those HTTPS URLs:
+   - App Name / `Title`: `TubeTV`
+   - App URL / `URL`: `https://<your-https-host>/<path>/` (the redirect page)
+   - Thumbnail / `Image`: `https://<your-https-host>/<path>/icon.png`
+   - Sidee `Id`/`mediaId`: `tubetv` (or reuse an existing ID deliberately),
+     `StoreType`: `99`
+3. Open **Edit Home** and tick **TubeTV**; new tiles do not show up on the dock
+   until they are selected there.
 
-On newer VIDAA versions the debug page can be password-gated; in that case use
-[vidaa-edge](https://github.com/weinzii/vidaa-edge) to install it as a PWA, or
-bookmark the URL in the browser. The app icon is also declared in
-`/manifest.webmanifest`, so a PWA install picks it up automatically.
+The redirect page sends the TV browser to `http://192.168.1.69:8484/?resume=1`.
+The `?resume=1` flag returns you to the last feed you were browsing. Normal links
+and a plain `http://<pi>:8484/` still open Home, but Home itself now remembers its
+scroll position and focused tile. If the Pi address changes, edit the redirect
+page rather than reinstalling the tile.
+
+On firmware where the debug page does nothing, Sidee is still the practical
+route. The app icon is also declared in `/manifest.webmanifest`, so a PWA install
+picks it up automatically.
 
 ## Sign in
 
