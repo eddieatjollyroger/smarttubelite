@@ -49,9 +49,10 @@ YouTube player code is loaded, so there are no ads to block.
   control bar persists. SponsorBlock data is by the SponsorBlock community,
   licensed [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 - Grid state survives full reloads: every feed remembers its scroll offset and
-  focused tile in `tubetv.nav`, so launching the app tile does not drop you back
-  at the first card. A tile URL with `?resume=1` also returns to the feed you were
-  last on
+  focused tile in `tubetv.nav`. A tile URL with `?resume=1` returns to the video
+  you were watching, or to the last feed if you backed out to the grid first.
+  The video resumes from its saved position, but the TV still reloads the web
+  app; it is not a persistent native process like YouTube
 - Remote-friendly UI: big tiles, arrow-key spatial navigation
 - Remembers where each video was left, resumes there on the next open (also via
   `/watch?id=…&t=<seconds>`), and paints YouTube's red watched bar under the tile on
@@ -351,28 +352,37 @@ On Linux the yt-dlp binary must match the machine: replace `bin/yt-dlp` with
 Open the **TV** URL in the TV browser. On VIDAA, install it as a real app tile so
 it launches straight from Home instead of living inside the browser.
 
-This firmware's app installer rejects plain `http://` app URLs. They register as
-`HTTP_APP_DEFAULT_URL<id>` rather than the real address — the same thing that
-happens to a local Jellyfin tile. Its HTTPS tiles, such as the Stremio preset,
-store the real URL. Keep the Pi on HTTP, but give the launcher an HTTPS URL that
-redirects to the Pi:
+On this U9 / `V0000.09.09F.P0930` firmware, a Sidee install with `StoreType: 99`
+works, but `sidee.py list` keeps reporting `HTTP_APP_DEFAULT_URL<id>` and
+`tile_matches_request()` prints `NOT confirmed by TV`. The raw record is marked
+`from: "app-store"`; that is a launcher readback quirk, not a failed install.
+Judge the install by clicking the tile on the TV, not by that string. Do not
+reinstall just to make the readback look different.
 
-1. Upload `tools/tile-redirect/index.html` and `tools/tile-redirect/icon.png` to
-   any trusted HTTPS host (GitHub Pages, a Cloudflare Worker, etc.).
-2. Register the tile with those HTTPS URLs:
-   - App Name / `Title`: `TubeTV`
-   - App URL / `URL`: `https://<your-https-host>/<path>/` (the redirect page)
-   - Thumbnail / `Image`: `https://<your-https-host>/<path>/icon.png`
-   - Sidee `Id`/`mediaId`: `tubetv` (or reuse an existing ID deliberately),
-     `StoreType`: `99`
-3. Open **Edit Home** and tick **TubeTV**; new tiles do not show up on the dock
-   until they are selected there.
+If the tile really does not open, inspect the raw record:
 
-The redirect page sends the TV browser to `http://192.168.1.69:8484/?resume=1`.
-The `?resume=1` flag returns you to the last feed you were browsing. Normal links
-and a plain `http://<pi>:8484/` still open Home, but Home itself now remembers its
-scroll position and focused tile. If the Pi address changes, edit the redirect
-page rather than reinstalling the tile.
+```python
+from core import client
+
+for a in client.list_tiles(client.Session.load()):
+    if str(a.get("appId", "")).lower() in ("tubetv", "joaotube", "jellyfin"):
+        print(a)
+```
+
+A full `StoreType: "custom"` payload did not change the readback on this
+firmware; `tools/sidee/install_tubetv_custom.py` is kept only as a diagnostic
+fallback. The HTTPS redirect page is still worth using because it gives the tile
+a stable target if the Pi address changes: upload `tools/tile-redirect/index.html`
+and `tools/tile-redirect/icon.png` to HTTPS hosting and point the tile at that
+page. It forwards the TV to `http://192.168.1.69:8484/?resume=1`.
+
+The `?resume=1` flag returns you to the video that was on screen when you left
+for Home, restoring its saved position. If you pressed Back inside TubeTV first,
+it returns to the last feed instead. Normal links and a plain
+`http://<pi>:8484/` still open Home, and Home remembers its scroll position and
+focused tile. A VIDAA web tile still has to reload its page; it cannot stay alive
+in the background the way YouTube's native app does. After installing, open **Edit Home** and tick
+**TubeTV**; new tiles do not show up on the dock until they are selected there.
 
 On firmware where the debug page does nothing, Sidee is still the practical
 route. The app icon is also declared in `/manifest.webmanifest`, so a PWA install
