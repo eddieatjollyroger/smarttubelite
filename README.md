@@ -18,10 +18,12 @@ YouTube player code is loaded, so there are no ads to block.
 - Subscriptions and watch **history** feeds
 - Search
 - Endless scrolling: reaching the last row loads the next page automatically. The
-  server hops past Shorts-only shelves, prefers the page-tail continuation over a
-  single shelf's token (so home does not stop after its first shelf), and rebuilds a
-  continuation token that has gone stale on a long-open TV session instead of ending
-  the grid
+  server prefers the page-tail continuation over a single shelf's token and keeps
+  following YouTube's own personalized chain past empty or Shorts-only shelves,
+  just like Leanback. It stops only at a real end token or a repeated token
+- No generalized recommendations: if the signed-in Home surface is sparse or
+  unavailable, Home stays empty. TubeTV never substitutes a popular/trending feed,
+  and an empty page never triggers a page reload or a rebuilt feed
 - H.264/AAC by default; VP9 1440p/2160p when the TV supports it, so old browsers
   still get a compatible stream
 - Videos go fullscreen and start **on their own**, muted first (no key needed), then
@@ -48,11 +50,10 @@ YouTube player code is loaded, so there are no ads to block.
   actions are honoured; chapters and "filler" are left alone. The toggle in the
   control bar persists. SponsorBlock data is by the SponsorBlock community,
   licensed [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)
-- Grid state survives full reloads: every feed remembers its scroll offset and
-  focused tile in `tubetv.nav`. A tile URL with `?resume=1` returns to the video
-  you were watching, or to the last feed if you backed out to the grid first.
-  The video resumes from its saved position, but the TV still reloads the web
-  app; it is not a persistent native process like YouTube
+- Opening the tile always starts at the top of Home. Feeds do not remember
+  scroll position or focus across page loads, and the tile does not reopen the
+  last video. The TV still reloads the web app; it is not a persistent native
+  process like YouTube
 - Remote-friendly UI: big tiles, arrow-key spatial navigation
 - Remembers where each video was left, resumes there on the next open (also via
   `/watch?id=…&t=<seconds>`), and paints YouTube's red watched bar under the tile on
@@ -374,14 +375,13 @@ firmware; `tools/sidee/install_tubetv_custom.py` is kept only as a diagnostic
 fallback. The HTTPS redirect page is still worth using because it gives the tile
 a stable target if the Pi address changes: upload `tools/tile-redirect/index.html`
 and `tools/tile-redirect/icon.png` to HTTPS hosting and point the tile at that
-page. It forwards the TV to `http://192.168.1.69:8484/?resume=1`.
+page. It forwards the TV to `http://192.168.1.69:8484/`.
 
-The `?resume=1` flag returns you to the video that was on screen when you left
-for Home, restoring its saved position. If you pressed Back inside TubeTV first,
-it returns to the last feed instead. Normal links and a plain
-`http://<pi>:8484/` still open Home, and Home remembers its scroll position and
-focused tile. A VIDAA web tile still has to reload its page; it cannot stay alive
-in the background the way YouTube's native app does. After installing, open **Edit Home** and tick
+Opening the tile always opens Home from the top. It does not return to the last
+video; press a video's tile to resume from its saved position. A VIDAA web tile
+still has to reload its page;
+it cannot stay alive in the background the way YouTube's native app does.
+After installing, open **Edit Home** and tick
 **TubeTV**; new tiles do not show up on the dock until they are selected there.
 
 On firmware where the debug page does nothing, Sidee is still the practical

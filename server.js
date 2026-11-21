@@ -30,7 +30,7 @@ import { page, grid, card, channelHead, comment, esc, playerMarkup } from './lib
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-19.4';
+const BUILD = '2026-11-20.5';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -1059,7 +1059,7 @@ async function handle(req, res) {
     return json(res, 200, {
       name: 'TubeTV',
       short_name: 'TubeTV',
-      start_url: '/?resume=1',
+      start_url: '/',
       display: 'fullscreen',
       background_color: '#0b0b0c',
       theme_color: '#0b0b0c',
@@ -1569,15 +1569,18 @@ async function handle(req, res) {
     let page = { videos: [], token: null };
     let hops = 0;
     try {
-      // A continuation token can point at a shelf rather than the page tail, or
-      // at a shelf that is entirely Shorts (which the home feed filters). Hop
-      // forward until real videos appear, so a Shorts-only stretch does not
-      // look like the end of the feed.
-      for (let i = 0; i < 8; i++) {
+      // A continuation can point at a shelf rather than the page tail, or at a
+      // shelf that is entirely Shorts (which Home filters). Leanback keeps
+      // following the chain instead of stopping at the first empty shelf, so
+      // do the same here. Stop only at real videos, a true end token, or a
+      // token we have already tried.
+      const seen = new Set([token]);
+      for (let i = 0; i < 24; i++) {
         page = await fetchPage(token);
         hops++;
         token = page.token;
-        if (page.videos.length || !token) break;
+        if (page.videos.length || !token || seen.has(token)) break;
+        seen.add(token);
       }
       // A healthy page (videos plus a next token) is the normal infinite-scroll
       // case; logging every one of them buried real errors under history spam.

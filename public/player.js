@@ -94,10 +94,6 @@
   // the pending seek for the video being opened; resumedTo drives the one-time
   // "Resumed at ..." hint.
   var HIST_KEY = 'tubetv.hist';
-  // The tile's ?resume=1 hop uses this to return to the video that was on
-  // screen when the viewer left for Home. It is cleared on an in-app Back, so
-  // only a real tile relaunch restores the watch page.
-  var LAST_KEY = 'tubetv.last';
   var resumeFrom = 0;
   var resumePct = 0;
   var resumedTo = 0;
@@ -2330,7 +2326,6 @@
     hideEndScreen();
     resetChrome();
     id = id2;
-    try { localStorage.setItem(LAST_KEY, JSON.stringify({ id: id2, at: Date.now() })); } catch (e) {}
     active = true;
     started = false;
     isLive = false;
@@ -2413,7 +2408,6 @@
     hideEndScreen();
     sendTrack(false);
     savePos(true);
-    try { localStorage.removeItem(LAST_KEY); } catch (e) {}
     resumeFrom = 0;
     resumePct = 0;
     resumedTo = 0;
