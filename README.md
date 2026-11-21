@@ -20,7 +20,10 @@ YouTube player code is loaded, so there are no ads to block.
 - Endless scrolling: reaching the last row loads the next page automatically. The
   server prefers the page-tail continuation over a single shelf's token and keeps
   following YouTube's own personalized chain past empty or Shorts-only shelves,
-  just like Leanback. It stops only at a real end token or a repeated token
+  just like Leanback. When that chain truly ends, Home silently fetches a fresh
+  signed-in feed server-side, drops duplicates by video id, and keeps appending
+  in place — no page reload, no visible refresh, no rebuilt app state. A cap keeps
+  it from fetching forever
 - No generalized recommendations: if the signed-in Home surface is sparse or
   unavailable, Home stays empty. TubeTV never substitutes a popular/trending feed,
   and an empty page never triggers a page reload or a rebuilt feed

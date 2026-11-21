@@ -30,7 +30,7 @@ import { page, grid, card, channelHead, comment, esc, playerMarkup } from './lib
 const PORT = Number(process.env.PORT || 8484);
 const HOST = process.env.HOST || '0.0.0.0';
 // Bumped by hand when behaviour changes, so /healthz shows what's deployed.
-const BUILD = '2026-11-20.5';
+const BUILD = '2026-11-20.6';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -1513,6 +1513,7 @@ async function handle(req, res) {
     const kind = url.searchParams.get('kind') || 'home';
     let token = url.searchParams.get('token') || '';
     const refresh = url.searchParams.get('refresh') === '1';
+    const extend = url.searchParams.get('extend') === '1';
     const channelId = url.searchParams.get('channel') || '';
     if (!token && !refresh) return json(res, 400, { error: 'missing token' });
     if (kind === 'channel' && !/^UC[A-Za-z0-9_-]{22}$/.test(channelId)) {
@@ -1568,6 +1569,7 @@ async function handle(req, res) {
 
     let page = { videos: [], token: null };
     let hops = 0;
+    let cyclic = false;
     try {
       // A continuation can point at a shelf rather than the page tail, or at a
       // shelf that is entirely Shorts (which Home filters). Leanback keeps
@@ -1579,7 +1581,9 @@ async function handle(req, res) {
         page = await fetchPage(token);
         hops++;
         token = page.token;
-        if (page.videos.length || !token || seen.has(token)) break;
+        if (page.videos.length) break;
+        if (!token) break;
+        if (seen.has(token)) { cyclic = true; break; }
         seen.add(token);
       }
       // A healthy page (videos plus a next token) is the normal infinite-scroll
@@ -1609,10 +1613,41 @@ async function handle(req, res) {
       return json(res, 502, { error: 'feed unavailable' });
     }
 
+    // Silent, personalized extension: when the Home continuation chain truly
+    // ends (YouTube's end token, or a token cycle), quietly load a fresh
+    // signed-in Home feed server-side. Drop anything already on this page, then
+    // hand back the remaining cards plus a fresh token. No page reload, no
+    // visible refresh, no app-state rebuild, and never a popular/generalized
+    // feed. The client caps how many times it asks for this so it cannot loop.
+    let extended = false;
+    if (kind === 'home' && extend && (!page.token || cyclic)) {
+      try {
+        const fresh = await yt.homePage();
+        const have = new Set(page.videos.map((v) => v.id));
+        const extra = [];
+        for (const v of fresh.videos || []) {
+          if (!v.id || have.has(v.id)) continue;
+          have.add(v.id);
+          extra.push(v);
+        }
+        if (extra.length || fresh.token) {
+          page = {
+            videos: page.videos.concat(extra),
+            token: fresh.token || null,
+          };
+          extended = true;
+          log('more extend home', `${extra.length}v`, fresh.token ? 'next' : 'end');
+        }
+      } catch (e) {
+        log('more extend ERR', kind, String(e.message || e).slice(0, 100));
+      }
+    }
+
     return json(res, 200, {
       html: page.videos.map(card).join(''),
       token: page.token || null,
       n: page.videos.length,
+      extended,
     });
   }
 
